@@ -26,6 +26,11 @@ Create `.env.local` from `.env.example` and set:
 2. `npm run convex:deploy`
 3. Deploy Nuxt output according to hosting target (`npm run preview` for smoke test).
 
+## Server Domain Routing (Apache)
+- Production: `https://moto.aoo.cz` proxies to `127.0.0.1:31899` (start with `npm run prod:moto`).
+- Development: `https://motocom.aoo.cz` proxies to `127.0.0.1:31900` (start with `npm run dev:motocom`).
+- Runtime env required for both modes: `CONVEX_URL` and `CONVEX_DEPLOYMENT`.
+
 ## Operational Notes
 - Keep room PIN secret and share only with trusted main drivers.
 - Upload compressed/mobile-friendly audio files to reduce playback latency.

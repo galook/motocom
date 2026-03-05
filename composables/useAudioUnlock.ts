@@ -1,7 +1,7 @@
 import { rewriteLoopbackUrlForClient } from "~/utils/mutation";
 
 const PLAY_START_TIMEOUT_MS = 2_000;
-const PLAYBACK_END_TIMEOUT_MS = 20_000;
+const PLAYBACK_END_TIMEOUT_MS = 8_000;
 const PLAYBACK_RETRY_DELAY_MS = 150;
 const MAX_PLAY_ATTEMPTS = 2;
 const SILENT_WAV_DATA_URI =
@@ -61,9 +61,23 @@ async function waitForPlaybackEnd(audio: HTMLAudioElement) {
     Math.ceil(durationSeconds * 1_000) + 500,
   );
 
+  if (audio.ended) {
+    return;
+  }
+
+  if (
+    audio.paused &&
+    audio.currentTime > 0 &&
+    durationSeconds > 0 &&
+    audio.currentTime >= Math.max(0, durationSeconds - 0.05)
+  ) {
+    return;
+  }
+
   await new Promise<void>((resolve) => {
     let settled = false;
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let pollHandle: ReturnType<typeof setInterval> | null = null;
 
     const finish = () => {
       if (settled) {
@@ -74,9 +88,14 @@ async function waitForPlaybackEnd(audio: HTMLAudioElement) {
         clearTimeout(timeoutHandle);
         timeoutHandle = null;
       }
+      if (pollHandle) {
+        clearInterval(pollHandle);
+        pollHandle = null;
+      }
       audio.removeEventListener("ended", onFinish);
       audio.removeEventListener("error", onFinish);
       audio.removeEventListener("abort", onFinish);
+      audio.removeEventListener("pause", onPause);
       resolve();
     };
 
@@ -84,10 +103,33 @@ async function waitForPlaybackEnd(audio: HTMLAudioElement) {
       finish();
     };
 
+    const onPause = () => {
+      if (audio.ended) {
+        finish();
+        return;
+      }
+
+      const currentDuration = Number.isFinite(audio.duration) ? audio.duration : 0;
+      if (
+        audio.paused &&
+        audio.currentTime > 0 &&
+        currentDuration > 0 &&
+        audio.currentTime >= Math.max(0, currentDuration - 0.05)
+      ) {
+        finish();
+      }
+    };
+
     timeoutHandle = setTimeout(onFinish, timeoutMs);
+    pollHandle = setInterval(() => {
+      if (audio.ended) {
+        finish();
+      }
+    }, 250);
     audio.addEventListener("ended", onFinish);
     audio.addEventListener("error", onFinish);
     audio.addEventListener("abort", onFinish);
+    audio.addEventListener("pause", onPause);
   });
 }
 
@@ -167,6 +209,7 @@ export function useAudioUnlock() {
         audio.load();
         await waitForPlayStart(audio);
         await waitForPlaybackEnd(audio);
+        resetAudioElement(audio);
         return;
       } catch (error) {
         lastError = error;

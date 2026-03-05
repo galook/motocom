@@ -38,12 +38,18 @@ function createAudioCtorMock(playPlan: Array<"never" | "resolve"> = []) {
       muted: false,
       duration: 0.1,
       currentTime: 0,
+      ended: false,
+      paused: true,
       load: vi.fn(),
-      pause: vi.fn(),
+      pause: vi.fn(() => {
+        audio.paused = true;
+      }),
       setAttribute: vi.fn(),
       removeAttribute: vi.fn((attribute: string) => {
         if (attribute === "src") {
           audio.src = "";
+          audio.ended = false;
+          audio.currentTime = 0;
         }
       }),
       addEventListener: vi.fn((eventName: string, handler: () => void) => {
@@ -59,6 +65,8 @@ function createAudioCtorMock(playPlan: Array<"never" | "resolve"> = []) {
 
     audio.play = vi.fn(() => {
       playedSrcs.push(audio.src);
+      audio.ended = false;
+      audio.paused = false;
       const behavior = playPlan[playIndex] ?? "resolve";
       playIndex += 1;
 
@@ -67,7 +75,11 @@ function createAudioCtorMock(playPlan: Array<"never" | "resolve"> = []) {
       }
 
       return Promise.resolve().then(() => {
-        setTimeout(() => emit("ended"), 0);
+        setTimeout(() => {
+          audio.ended = true;
+          audio.paused = true;
+          emit("ended");
+        }, 0);
       });
     });
 
@@ -136,6 +148,7 @@ describe("useAudioUnlock", () => {
 
     expect(audioMock.ctor).toHaveBeenCalledTimes(1);
     expect(audioMock.playedSrcs).toEqual(["first.mp3", "second.mp3"]);
+    expect(audioMock.instances[0].removeAttribute).toHaveBeenCalledTimes(2);
   });
 
   it("keeps queue moving when playback start hangs on iOS-like failures", async () => {

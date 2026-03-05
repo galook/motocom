@@ -77,7 +77,12 @@ function resolveConvexUrl(rawUrl?: string): string {
   return normalizeConvexUrl(parsedUrl);
 }
 
-const resolvedConvexUrl = resolveConvexUrl(process.env.CONVEX_URL);
+const rawConvexUrl = process.env.CONVEX_URL?.trim() ?? "";
+const fallbackConvexUrl = "http://127.0.0.1:3210";
+const resolvedConvexUrl = rawConvexUrl
+  ? resolveConvexUrl(rawConvexUrl)
+  : fallbackConvexUrl;
+const convexConfigured = rawConvexUrl.length > 0;
 const devPublicHost = (process.env.DEV_PUBLIC_HOST || "moto.okbaselight.com").trim();
 
 function parsePort(value: string | undefined, fallback: number): number {
@@ -98,7 +103,7 @@ export default defineNuxtConfig({
       host: "0.0.0.0",
       port: devServerPort,
       strictPort: true,
-      allowedHosts: ["moto.okbaselight.com", devPublicHost],
+      allowedHosts: ["moto.okbaselight.com", "aoo.cz", "moto.aoo.cz", "motocom.aoo.cz", devPublicHost],
       hmr: {
         host: devPublicHost,
         protocol: "wss",
@@ -123,10 +128,12 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       convexUrl: resolvedConvexUrl,
+      convexConfigured,
     },
   },
   convex: {
     url: resolvedConvexUrl,
+    server: false,
   },
   pwa: {
     registerType: "autoUpdate",

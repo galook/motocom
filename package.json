@@ -7,9 +7,11 @@
   },
   "scripts": {
     "dev": "nuxt dev --dotenv .env.local",
+    "dev:motocom": "CONVEX_URL=https://motocom.aoo.cz/convex NUXT_PORT=31900 NUXT_HOST=127.0.0.1 NUXT_DEV_PORT=31900 DEV_PUBLIC_HOST=motocom.aoo.cz DEV_HMR_CLIENT_PORT=443 nuxt dev --dotenv .env.local --host 127.0.0.1 --port 31900",
     "build": "nuxt build",
     "prod": "npm run convex:deploy && npm run prod:app",
-    "prod:app": "nuxt build && NITRO_HOST=0.0.0.0 NITRO_PORT=31899 PORT=31899 node .output/server/index.mjs",
+    "prod:app": "nuxt build --dotenv .env.local && NITRO_HOST=127.0.0.1 NITRO_PORT=31899 PORT=31899 node .output/server/index.mjs",
+    "prod:moto": "npm run prod:app",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "convex:dev": "convex dev",

@@ -19,9 +19,11 @@ Nuxt + Convex app for synchronized motorcycle group sound requests.
 3. Install deps: `npm install`.
 4. Start Convex: `npm run convex:dev` (this regenerates `convex/_generated/*` with environment-specific types).
 5. Start Nuxt: `npm run dev`.
-6. Run tests: `npm run test` (coverage: `npm run test:coverage`).
-7. One-command production deploy + build + run on port `31899`: `npm run prod`.
-8. `npm run prod` runs `convex deploy` first, so ensure Convex auth/deploy credentials are configured in the environment.
+6. Server-mapped dev mode for Apache (`motocom.aoo.cz -> :31900`): `npm run dev:motocom`.
+7. Run tests: `npm run test` (coverage: `npm run test:coverage`).
+8. One-command production deploy + build + run on port `31899`: `npm run prod`.
+9. Apache-targeted production start (`moto.aoo.cz -> :31899`): `npm run prod:moto`.
+10. `npm run prod` runs `convex deploy` first, so ensure Convex auth/deploy credentials are configured in the environment.
 
 ## PWA Usage
 - Open the app in browser and use `Add to Home Screen` / `Install app`.
