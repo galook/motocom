@@ -14,7 +14,7 @@ function installStateMocks() {
   (globalThis as any).ref = ref;
 }
 
-function createAudioCtorMock(playPlan: Array<"never" | "resolve"> = []) {
+function createAudioCtorMock(playPlan: Array<"never" | "resolve" | "rejectNotAllowed"> = []) {
   const instances: any[] = [];
   const playedSrcs: string[] = [];
   let playIndex = 0;
@@ -72,6 +72,9 @@ function createAudioCtorMock(playPlan: Array<"never" | "resolve"> = []) {
 
       if (behavior === "never") {
         return new Promise<void>(() => {});
+      }
+      if (behavior === "rejectNotAllowed") {
+        return Promise.reject(new DOMException("The operation is not allowed.", "NotAllowedError"));
       }
 
       return Promise.resolve().then(() => {
@@ -167,5 +170,79 @@ describe("useAudioUnlock", () => {
 
     expect(audioMock.ctor).toHaveBeenCalledTimes(1);
     expect(audioMock.playedSrcs).toEqual(["first.mp3", "first.mp3", "second.mp3"]);
+  });
+
+  it("re-locks audio after NotAllowed playback failures", async () => {
+    const audioMock = createAudioCtorMock(["rejectNotAllowed"]);
+    (globalThis as any).Audio = audioMock.ctor;
+
+    const composable = useAudioUnlock();
+    composable.isUnlocked.value = true;
+
+    composable.queuePlayback("first.mp3");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(composable.isUnlocked.value).toBe(false);
+  });
+
+  it("buffers playback while locked and flushes once unlocked", async () => {
+    const audioMock = createAudioCtorMock();
+    (globalThis as any).Audio = audioMock.ctor;
+
+    const composable = useAudioUnlock();
+    composable.queuePlayback("queued.mp3");
+
+    expect(audioMock.ctor).not.toHaveBeenCalled();
+
+    await composable.unlockAudio();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(audioMock.playedSrcs.some((src) => src.includes("queued.mp3"))).toBe(true);
+  });
+
+  it("does not stay in enabling state when audio context resume hangs", async () => {
+    vi.useFakeTimers();
+    const audioMock = createAudioCtorMock(["never"]);
+    (globalThis as any).Audio = audioMock.ctor;
+
+    class HangingAudioContext {
+      state = "suspended";
+
+      createGain() {
+        return {
+          gain: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        };
+      }
+
+      createOscillator() {
+        return {
+          type: "sine",
+          frequency: { value: 440 },
+          connect: vi.fn(),
+          start: vi.fn(),
+          stop: vi.fn(),
+          disconnect: vi.fn(),
+        };
+      }
+
+      resume() {
+        return new Promise<void>(() => {});
+      }
+    }
+
+    (window as any).AudioContext = HangingAudioContext;
+
+    const composable = useAudioUnlock();
+    const unlockTask = composable.unlockAudio();
+    expect(composable.isUnlocking.value).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(4_500);
+    await unlockTask;
+
+    expect(composable.isUnlocking.value).toBe(false);
   });
 });

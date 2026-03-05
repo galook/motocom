@@ -3,7 +3,18 @@ function createFallbackSessionId() {
 }
 
 export function generateSessionId(randomUUID?: (() => string) | null): string {
-  return randomUUID?.() ?? createFallbackSessionId();
+  if (typeof randomUUID === "function") {
+    try {
+      const generatedId = randomUUID();
+      if (generatedId) {
+        return generatedId;
+      }
+    } catch {
+      // Fall through to deterministic fallback when Web Crypto call context is invalid.
+    }
+  }
+
+  return createFallbackSessionId();
 }
 
 export function resolveSessionId(

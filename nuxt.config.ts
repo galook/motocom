@@ -79,34 +79,89 @@ function resolveConvexUrl(rawUrl?: string): string {
 
 const rawConvexUrl = process.env.CONVEX_URL?.trim() ?? "";
 const fallbackConvexUrl = "http://127.0.0.1:3210";
-const resolvedConvexUrl = rawConvexUrl
+const resolvedConvexInternalUrl = rawConvexUrl
   ? resolveConvexUrl(rawConvexUrl)
   : fallbackConvexUrl;
 const convexConfigured = rawConvexUrl.length > 0;
 const devPublicHost = (process.env.DEV_PUBLIC_HOST || "moto.okbaselight.com").trim();
+const defaultConvexPublicUrl = isLoopbackHostname(devPublicHost)
+  ? resolvedConvexInternalUrl
+  : "/convex";
+const resolvedConvexPublicUrl = (process.env.CONVEX_PUBLIC_URL || defaultConvexPublicUrl).trim();
+
+function resolveConvexModuleUrl(publicUrl: string, fallbackUrl: string, host: string): string {
+  if (!publicUrl) {
+    return fallbackUrl;
+  }
+  if (publicUrl.startsWith("http://") || publicUrl.startsWith("https://")) {
+    return publicUrl;
+  }
+  if (publicUrl.startsWith("/")) {
+    return `https://${host}${publicUrl}`;
+  }
+  return publicUrl;
+}
+
+function sanitizePublicConvexUrl(publicUrl: string, publicHost: string): string {
+  const trimmed = publicUrl.trim();
+  if (!trimmed.startsWith("http://")) {
+    return trimmed;
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(trimmed);
+  } catch {
+    return trimmed;
+  }
+
+  if (isLoopbackHostname(publicHost) || isLoopbackHostname(parsedUrl.hostname)) {
+    return trimmed;
+  }
+
+  // For HTTPS deployments behind reverse proxy, avoid exposing insecure direct Convex URLs.
+  return "/convex";
+}
 
 function parsePort(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-const devServerPort = parsePort(process.env.NUXT_DEV_PORT, 5173);
+const devServerPort = parsePort(process.env.NUXT_DEV_PORT, 3001);
 const devHmrClientPort = parsePort(process.env.DEV_HMR_CLIENT_PORT, 443);
+const sanitizedConvexPublicUrl = sanitizePublicConvexUrl(resolvedConvexPublicUrl, devPublicHost);
+const resolvedConvexModuleUrl = resolveConvexModuleUrl(
+  sanitizedConvexPublicUrl,
+  resolvedConvexInternalUrl,
+  devPublicHost,
+);
 
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
   devtools: { enabled: true },
+  devServer: {
+    host: "0.0.0.0",
+    port: devServerPort,
+  },
   modules: ["convex-nuxt", "@vite-pwa/nuxt"],
   css: ["~/assets/css/main.css"],
   vite: {
     server: {
-      host: "0.0.0.0",
-      port: devServerPort,
-      strictPort: true,
-      allowedHosts: ["moto.okbaselight.com", "aoo.cz", "moto.aoo.cz", "motocom.aoo.cz", devPublicHost],
+      allowedHosts: [
+        "moto.okbaselight.com",
+        "motocon.okbaselight.com",
+        "motocom.okbaselight.com",
+        "okbaselight.com",
+        "aoo.cz",
+        "moto.aoo.cz",
+        "motocom.aoo.cz",
+        devPublicHost,
+      ],
       hmr: {
         host: devPublicHost,
         protocol: "wss",
+        port: devHmrClientPort,
         clientPort: devHmrClientPort,
       },
     },
@@ -127,13 +182,12 @@ export default defineNuxtConfig({
   },
   runtimeConfig: {
     public: {
-      convexUrl: resolvedConvexUrl,
+      convexUrl: sanitizedConvexPublicUrl,
       convexConfigured,
     },
   },
   convex: {
-    url: resolvedConvexUrl,
-    server: false,
+    url: resolvedConvexModuleUrl,
   },
   pwa: {
     registerType: "autoUpdate",

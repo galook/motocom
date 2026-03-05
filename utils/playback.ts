@@ -29,7 +29,7 @@ export function planPlayback(input: PlaybackPlanInput): PlaybackPlan {
 
   const nextSeq = freshEvents[freshEvents.length - 1].seq;
 
-  if (!input.audioUnlocked || !input.selfIsActive) {
+  if (!input.selfIsActive) {
     return {
       nextSeq,
       urls: [],
