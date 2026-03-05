@@ -21,8 +21,11 @@ const isJoiningRoom = ref(false);
 const isClaiming = ref(false);
 const connectionWarning = computed(() => buildConnectivityHint(convexUrl));
 const APP_LOCKED_MESSAGE = "Tap the speaker icon to unlock audio before using the app.";
+const RESOLUTION_FEEDBACK_MS = 3_500;
 
 const { isUnlocked, isUnlocking, unlockAudio, queuePlayback } = useAudioUnlock();
+const feedbackNow = ref(Date.now());
+let feedbackTicker: ReturnType<typeof setInterval> | null = null;
 
 const roomQueryArgs = computed(() => ({
   roomCode: roomCode.value,
@@ -45,20 +48,17 @@ const buttonStates = computed<Record<string, ButtonVisualState>>(() => {
     return {};
   }
 
+  const now = feedbackNow.value;
   const visualByButton: Record<string, ButtonVisualState> = {};
   for (const button of state.buttons) {
     visualByButton[button.id] = "idle";
   }
 
   for (const event of state.events) {
-    if (!event.buttonId) {
+    if (!event.buttonId || event.type !== "request_resolved" || !event.decision) {
       continue;
     }
-    if (event.type === "request_started") {
-      visualByButton[event.buttonId] = "pending";
-      continue;
-    }
-    if (event.type === "request_resolved" && event.decision) {
+    if (now - event.createdAt <= RESOLUTION_FEEDBACK_MS) {
       visualByButton[event.buttonId] = event.decision;
     }
   }
@@ -307,9 +307,20 @@ onMounted(() => {
     return;
   }
 
+  feedbackTicker = window.setInterval(() => {
+    feedbackNow.value = Date.now();
+  }, 500);
+
   const storedName = window.localStorage.getItem("motocom.display-name");
   if (storedName) {
     localDisplayName.value = storedName;
+  }
+});
+
+onUnmounted(() => {
+  if (feedbackTicker) {
+    clearInterval(feedbackTicker);
+    feedbackTicker = null;
   }
 });
 </script>

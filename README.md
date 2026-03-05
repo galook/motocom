@@ -11,6 +11,7 @@ Nuxt + Convex app for synchronized motorcycle group sound requests.
 - Presence heartbeat and active/inactive participant state.
 - Event playback sync excluding local sender/resolver audio.
 - Upload sources can be audio (`.m4a` included) or video (`.mov/.mp4`), using the media audio track for playback.
+- PWA enabled (service worker, installable manifest, iOS/Android home screen icons).
 
 ## Quick Start
 1. Use Node 20 (`nvm use`).
@@ -19,6 +20,10 @@ Nuxt + Convex app for synchronized motorcycle group sound requests.
 4. Start Convex: `npm run convex:dev` (this regenerates `convex/_generated/*` with environment-specific types).
 5. Start Nuxt: `npm run dev`.
 6. Run tests: `npm run test` (coverage: `npm run test:coverage`).
+
+## PWA Usage
+- Open the app in browser and use `Add to Home Screen` / `Install app`.
+- The app ships a generated service worker and web app manifest.
 
 ## Phone Testing (Local LAN)
 - If your phone can open Nuxt but create/join times out, `CONVEX_URL` is likely using loopback (`127.0.0.1` or `localhost`).

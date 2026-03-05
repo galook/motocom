@@ -82,8 +82,21 @@ const resolvedConvexUrl = resolveConvexUrl(process.env.CONVEX_URL);
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
   devtools: { enabled: true },
-  modules: ["convex-nuxt"],
+  modules: ["convex-nuxt", "@vite-pwa/nuxt"],
   css: ["~/assets/css/main.css"],
+  app: {
+    head: {
+      meta: [
+        { name: "theme-color", content: "#fff8ef" },
+        { name: "apple-mobile-web-app-capable", content: "yes" },
+        { name: "apple-mobile-web-app-status-bar-style", content: "default" },
+      ],
+      link: [
+        { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+        { rel: "apple-touch-icon", sizes: "180x180", href: "/apple-touch-icon.png" },
+      ],
+    },
+  },
   runtimeConfig: {
     public: {
       convexUrl: resolvedConvexUrl,
@@ -91,5 +104,48 @@ export default defineNuxtConfig({
   },
   convex: {
     url: resolvedConvexUrl,
+  },
+  pwa: {
+    registerType: "autoUpdate",
+    manifest: {
+      id: "/",
+      name: "MotoCom Synchronized Soundboard",
+      short_name: "MotoCom",
+      description: "Synchronized soundboard for group motorcycle rides.",
+      start_url: "/",
+      scope: "/",
+      display: "standalone",
+      orientation: "portrait",
+      background_color: "#fff8ef",
+      theme_color: "#fff8ef",
+      lang: "en-US",
+      icons: [
+        {
+          src: "/pwa-192x192.png",
+          sizes: "192x192",
+          type: "image/png",
+        },
+        {
+          src: "/pwa-512x512.png",
+          sizes: "512x512",
+          type: "image/png",
+        },
+        {
+          src: "/pwa-maskable-512x512.png",
+          sizes: "512x512",
+          type: "image/png",
+          purpose: "maskable",
+        },
+      ],
+    },
+    workbox: {
+      cleanupOutdatedCaches: true,
+      globPatterns: ["**/*.{js,css,html,ico,png,svg,json,woff2}"],
+    },
+    devOptions: {
+      enabled: true,
+      suppressWarnings: true,
+      type: "module",
+    },
   },
 });

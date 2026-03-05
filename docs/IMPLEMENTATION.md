@@ -37,3 +37,4 @@
 - [x] [DONE] Expanded tests to composables, Convex helper workflows, and interactive Vue components (58 passing tests).
 - [x] [DONE] Added mutation timeout protection and loopback/LAN connectivity hints to avoid infinite loading on phones.
 - [x] [DONE] Hardened iOS audio reliability by reusing one unlocked player with sequential playback, timeouts, and retry handling.
+- [x] [DONE] Made accept/reject button glow feedback transient (auto-resets to idle after a few seconds).
