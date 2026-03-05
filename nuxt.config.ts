@@ -78,6 +78,15 @@ function resolveConvexUrl(rawUrl?: string): string {
 }
 
 const resolvedConvexUrl = resolveConvexUrl(process.env.CONVEX_URL);
+const devPublicHost = (process.env.DEV_PUBLIC_HOST || "moto.okbaselight.com").trim();
+
+function parsePort(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const devServerPort = parsePort(process.env.NUXT_DEV_PORT, 5173);
+const devHmrClientPort = parsePort(process.env.DEV_HMR_CLIENT_PORT, 443);
 
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
@@ -86,13 +95,22 @@ export default defineNuxtConfig({
   css: ["~/assets/css/main.css"],
   vite: {
     server: {
-      allowedHosts: ["moto.okbaselight.com"],
+      host: "0.0.0.0",
+      port: devServerPort,
+      strictPort: true,
+      allowedHosts: ["moto.okbaselight.com", devPublicHost],
+      hmr: {
+        host: devPublicHost,
+        protocol: "wss",
+        clientPort: devHmrClientPort,
+      },
     },
   },
   app: {
     head: {
       meta: [
         { name: "theme-color", content: "#fff8ef" },
+        { name: "mobile-web-app-capable", content: "yes" },
         { name: "apple-mobile-web-app-capable", content: "yes" },
         { name: "apple-mobile-web-app-status-bar-style", content: "default" },
       ],
@@ -148,7 +166,7 @@ export default defineNuxtConfig({
       globPatterns: ["**/*.{js,css,html,ico,png,svg,json,woff2}"],
     },
     devOptions: {
-      enabled: true,
+      enabled: false,
       suppressWarnings: true,
       type: "module",
     },
