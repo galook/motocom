@@ -1,0 +1,34 @@
+{
+  "name": "motocom-soundboard",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20 <21"
+  },
+  "scripts": {
+    "dev": "nuxt dev --dotenv .env.local",
+    "build": "nuxt build",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare",
+    "convex:dev": "convex dev",
+    "convex:deploy": "convex deploy",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "convex": "^1.25.2",
+    "convex-nuxt": "^0.1.3",
+    "nuxt": "^3.17.6",
+    "vue": "^3.5.17",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.4",
+    "@vitest/coverage-v8": "^2.1.9",
+    "@vue/test-utils": "^2.4.6",
+    "jsdom": "^24.1.1",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}
