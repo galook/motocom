@@ -84,6 +84,11 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
   modules: ["convex-nuxt", "@vite-pwa/nuxt"],
   css: ["~/assets/css/main.css"],
+  vite: {
+    server: {
+      allowedHosts: ["moto.okbaselight.com"],
+    },
+  },
   app: {
     head: {
       meta: [
