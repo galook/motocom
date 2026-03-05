@@ -156,7 +156,7 @@ const uploadFile = async (file: File) => {
     convexUrl,
   });
 
-  const uploadUrl = rewriteLoopbackUrlForClient(uploadUrlResult.uploadUrl);
+  const uploadUrl = rewriteLoopbackUrlForClient(uploadUrlResult.uploadUrl, undefined, convexUrl);
   const response = await fetch(uploadUrl, {
     method: "POST",
     headers: {

@@ -7,8 +7,11 @@ import {
   toErrorMessage,
 } from "../utils/mutation";
 
+const originalWindow = (globalThis as any).window;
+
 afterEach(() => {
   vi.useRealTimers();
+  (globalThis as any).window = originalWindow;
 });
 
 describe("runMutation", () => {
@@ -105,6 +108,42 @@ describe("connectivity helpers", () => {
       rewriteLoopbackUrlForClient("http://127.0.0.1:3210/api/storage/upload", "localhost"),
     ).toBe("http://127.0.0.1:3210/api/storage/upload");
     expect(rewriteLoopbackUrlForClient("/relative/path", "172.20.10.5")).toBe("/relative/path");
+  });
+
+  it("rewrites insecure Convex API URLs through secure public Convex path", () => {
+    (globalThis as any).window = {
+      location: {
+        hostname: "moto.okbaselight.com",
+        origin: "https://moto.okbaselight.com",
+        protocol: "https:",
+      },
+    };
+
+    expect(
+      rewriteLoopbackUrlForClient(
+        "http://moto.okbaselight.com:3210/api/storage/upload?token=abc",
+        undefined,
+        "/convex",
+      ),
+    ).toBe("https://moto.okbaselight.com/convex/api/storage/upload?token=abc");
+  });
+
+  it("rewrites loopback upload URLs to secure public Convex path for remote devices", () => {
+    (globalThis as any).window = {
+      location: {
+        hostname: "moto.okbaselight.com",
+        origin: "https://moto.okbaselight.com",
+        protocol: "https:",
+      },
+    };
+
+    expect(
+      rewriteLoopbackUrlForClient(
+        "http://127.0.0.1:3210/api/storage/upload?token=abc",
+        "10.0.0.43",
+        "/convex",
+      ),
+    ).toBe("https://moto.okbaselight.com/convex/api/storage/upload?token=abc");
   });
 });
 

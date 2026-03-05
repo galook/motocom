@@ -84,7 +84,7 @@ describe("planPlayback", () => {
     expect(result.urls).toEqual(["horn.mp3", "accept.mp3"]);
   });
 
-  it("returns no urls when audio is locked", () => {
+  it("still returns urls when audio is locked so playback can resume after unlock", () => {
     const result = planPlayback({
       events,
       lastSeq: 0,
@@ -103,6 +103,6 @@ describe("planPlayback", () => {
       outcomeSounds: { acceptUrl: "accept.mp3", rejectUrl: "reject.mp3" },
     });
 
-    expect(result).toEqual({ nextSeq: 3, urls: [] });
+    expect(result).toEqual({ nextSeq: 3, urls: ["horn.mp3", "accept.mp3"] });
   });
 });

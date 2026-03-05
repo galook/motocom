@@ -23,7 +23,7 @@ const connectionWarning = computed(() => buildConnectivityHint(convexUrl));
 const APP_LOCKED_MESSAGE = "Tap the speaker icon to unlock audio before using the app.";
 const RESOLUTION_FEEDBACK_MS = 3_500;
 
-const { isUnlocked, isUnlocking, unlockAudio, queuePlayback } = useAudioUnlock();
+const { isUnlocked, isUnlocking, unlockAudio, queuePlayback } = useAudioUnlock(convexUrl);
 const feedbackNow = ref(Date.now());
 let feedbackTicker: ReturnType<typeof setInterval> | null = null;
 

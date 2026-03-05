@@ -20,16 +20,30 @@ const isJoining = ref(false);
 const errorMessage = ref("");
 const connectionWarning = computed(() => buildConnectivityHint(convexUrl));
 
+function trimToString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : String(value ?? "").trim();
+}
+
+function hasText(value: unknown): boolean {
+  return trimToString(value).length > 0;
+}
+
+function toActiveRooms(value: unknown): ActiveRoomSummary[] {
+  return Array.isArray(value) ? value as ActiveRoomSummary[] : [];
+}
+
 const { data: activeRoomsData, isPending: activeRoomsPending } = useConvexQuery(
   api.rooms.listActiveRooms,
   {},
 );
 
-const activeRooms = computed(() => (activeRoomsData.value ?? []) as ActiveRoomSummary[]);
+const activeRooms = computed<ActiveRoomSummary[]>(() => toActiveRooms(activeRoomsData.value));
+const hasActiveRooms = computed(() => activeRooms.value.length > 0);
 
 watch(
   activeRooms,
-  (rooms) => {
+  (roomsValue) => {
+    const rooms = toActiveRooms(roomsValue);
     if (!joinRoomCode.value && rooms.length > 0) {
       joinRoomCode.value = rooms[0].code;
     }
@@ -44,6 +58,21 @@ watch(
 const { mutate: createRoomMutation } = useConvexMutation(api.rooms.createRoom);
 const { mutate: joinRoomMutation } = useConvexMutation(api.rooms.joinRoom);
 
+const canCreateRoom = computed(() => (
+  !connectionWarning.value &&
+  !isCreating.value &&
+  hasText(createRoomName.value) &&
+  hasText(createDisplayName.value) &&
+  hasText(createPin.value)
+));
+
+const canJoinRoom = computed(() => (
+  !connectionWarning.value &&
+  !isJoining.value &&
+  hasText(joinRoomCode.value) &&
+  hasText(joinDisplayName.value)
+));
+
 const requireSessionId = () => {
   if (!sessionId.value) {
     throw new Error("Session is not ready yet. Refresh and try again.");
@@ -56,6 +85,9 @@ const createRoom = async () => {
 
   try {
     requireSessionId();
+    const roomName = trimToString(createRoomName.value);
+    const displayName = trimToString(createDisplayName.value);
+    const mainDriverPin = trimToString(createPin.value);
 
     const maxAttempts = 8;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -64,9 +96,9 @@ const createRoom = async () => {
       try {
         await runMutation(createRoomMutation, {
           roomCode: generatedCode,
-          roomName: createRoomName.value.trim(),
-          displayName: createDisplayName.value.trim(),
-          mainDriverPin: createPin.value,
+          roomName,
+          displayName,
+          mainDriverPin,
           sessionId: sessionId.value,
         }, {
           operationName: "Create room",
@@ -74,7 +106,7 @@ const createRoom = async () => {
         });
 
         if (process.client) {
-          window.localStorage.setItem("motocom.display-name", createDisplayName.value.trim());
+          window.localStorage.setItem("motocom.display-name", displayName);
         }
 
         await navigateTo(`/room/${generatedCode}`);
@@ -100,11 +132,11 @@ const joinRoom = async () => {
 
   try {
     requireSessionId();
-
-    const selectedCode = joinRoomCode.value.trim().toUpperCase();
+    const selectedCode = trimToString(joinRoomCode.value).toUpperCase();
+    const displayName = trimToString(joinDisplayName.value);
     await runMutation(joinRoomMutation, {
       roomCode: selectedCode,
-      displayName: joinDisplayName.value.trim(),
+      displayName,
       sessionId: sessionId.value,
     }, {
       operationName: "Join room",
@@ -112,7 +144,7 @@ const joinRoom = async () => {
     });
 
     if (process.client) {
-      window.localStorage.setItem("motocom.display-name", joinDisplayName.value.trim());
+      window.localStorage.setItem("motocom.display-name", displayName);
     }
 
     await navigateTo(`/room/${selectedCode}`);
@@ -163,7 +195,7 @@ onMounted(() => {
         </div>
       </div>
       <button
-        :disabled="Boolean(connectionWarning) || isCreating || !createRoomName.trim() || !createDisplayName.trim() || !createPin.trim()"
+        :disabled="!canCreateRoom"
         @click="createRoom"
       >
         {{ isCreating ? 'Creating...' : 'Create Room' }}
@@ -173,14 +205,14 @@ onMounted(() => {
     <section class="card">
       <h2>Join Active Room</h2>
       <p class="muted" v-if="activeRoomsPending">Loading active rooms...</p>
-      <p class="muted" v-else-if="!activeRooms.length">
+      <p class="muted" v-else-if="!hasActiveRooms">
         No active rooms right now.
       </p>
 
       <div class="row">
         <div class="field-col">
           <label>Active room</label>
-          <select v-model="joinRoomCode" :disabled="!activeRooms.length">
+          <select v-model="joinRoomCode" :disabled="!hasActiveRooms">
             <option v-for="room in activeRooms" :key="room.id" :value="room.code">
               {{ room.name }} ({{ room.code }}) · {{ room.activeParticipants }} active
             </option>
@@ -194,7 +226,7 @@ onMounted(() => {
 
       <button
         class="secondary"
-        :disabled="Boolean(connectionWarning) || isJoining || !joinRoomCode.trim() || !joinDisplayName.trim()"
+        :disabled="!canJoinRoom"
         @click="joinRoom"
       >
         {{ isJoining ? 'Joining...' : 'Join Room' }}

@@ -6,7 +6,10 @@ export function useSessionId() {
 
   if (process.client && !sessionId.value) {
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    sessionId.value = resolveSessionId(stored, window.crypto?.randomUUID);
+    const randomUUID = typeof window.crypto?.randomUUID === "function"
+      ? () => window.crypto.randomUUID()
+      : undefined;
+    sessionId.value = resolveSessionId(stored, randomUUID);
 
     if (!stored) {
       window.localStorage.setItem(STORAGE_KEY, sessionId.value);

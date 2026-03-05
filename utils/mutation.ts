@@ -29,6 +29,72 @@ function getClientHost(overrideHost?: string): string | null {
   return window.location.hostname || null;
 }
 
+function getClientOrigin(overrideOrigin?: string): string | null {
+  if (overrideOrigin && overrideOrigin.trim()) {
+    return overrideOrigin.trim();
+  }
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return window.location.origin || null;
+}
+
+function getClientProtocol(overrideOrigin?: string): string | null {
+  const clientOrigin = getClientOrigin(overrideOrigin);
+  if (!clientOrigin) {
+    return null;
+  }
+  try {
+    return new URL(clientOrigin).protocol;
+  } catch {
+    return null;
+  }
+}
+
+function getRuntimeConvexPublicUrl(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const runtimeConfig = (window as Window & {
+    __NUXT__?: {
+      config?: {
+        public?: {
+          convexUrl?: unknown;
+        };
+      };
+    };
+  }).__NUXT__?.config;
+
+  const candidate = runtimeConfig?.public?.convexUrl;
+  return typeof candidate === "string" && candidate.trim()
+    ? candidate.trim()
+    : null;
+}
+
+function resolveClientConvexBaseUrl(
+  convexUrlOverride?: string,
+  clientOriginOverride?: string,
+): URL | null {
+  const candidateConvexUrl = convexUrlOverride?.trim() || getRuntimeConvexPublicUrl();
+  if (!candidateConvexUrl) {
+    return null;
+  }
+
+  try {
+    if (candidateConvexUrl.startsWith("/")) {
+      const clientOrigin = getClientOrigin(clientOriginOverride);
+      if (!clientOrigin) {
+        return null;
+      }
+      return new URL(candidateConvexUrl, clientOrigin);
+    }
+    return new URL(candidateConvexUrl);
+  } catch {
+    return null;
+  }
+}
+
 export function buildConnectivityHint(
   convexUrl?: string,
   clientHostOverride?: string,
@@ -76,25 +142,46 @@ function buildTimeoutMessage(
 export function rewriteLoopbackUrlForClient(
   rawUrl: string,
   clientHostOverride?: string,
+  convexUrlOverride?: string,
+  clientOriginOverride?: string,
 ): string {
   if (!rawUrl || typeof rawUrl !== "string") {
     return rawUrl;
   }
 
-  let parsedUrl: URL;
+  let rewrittenUrl: URL;
   try {
-    parsedUrl = new URL(rawUrl);
+    rewrittenUrl = new URL(rawUrl);
   } catch {
     return rawUrl;
   }
 
   const clientHost = getClientHost(clientHostOverride);
-  if (!clientHost || isLoopbackHost(clientHost) || !isLoopbackHost(parsedUrl.hostname)) {
-    return rawUrl;
+  if (clientHost && !isLoopbackHost(clientHost) && isLoopbackHost(rewrittenUrl.hostname)) {
+    rewrittenUrl.hostname = clientHost;
   }
 
-  parsedUrl.hostname = clientHost;
-  return parsedUrl.toString();
+  const clientProtocol = getClientProtocol(clientOriginOverride);
+  if (clientProtocol === "https:" && rewrittenUrl.protocol === "http:") {
+    const convexBaseUrl = resolveClientConvexBaseUrl(convexUrlOverride, clientOriginOverride);
+    if (convexBaseUrl && rewrittenUrl.pathname.startsWith("/api/")) {
+      if (convexBaseUrl.protocol === "http:") {
+        convexBaseUrl.protocol = "https:";
+      }
+      const convexBasePath = convexBaseUrl.pathname.replace(/\/$/, "");
+      const mergedPath = `${convexBasePath}${rewrittenUrl.pathname}` || rewrittenUrl.pathname;
+      return `${convexBaseUrl.origin}${mergedPath}${rewrittenUrl.search}${rewrittenUrl.hash}`;
+    }
+
+    if (clientHost && rewrittenUrl.hostname === clientHost) {
+      rewrittenUrl.protocol = "https:";
+      if (rewrittenUrl.port === "80") {
+        rewrittenUrl.port = "";
+      }
+    }
+  }
+
+  return rewrittenUrl.toString();
 }
 
 export async function runMutation<TInput, TOutput>(
