@@ -8,6 +8,8 @@
   "scripts": {
     "dev": "nuxt dev --dotenv .env.local",
     "build": "nuxt build",
+    "prod": "npm run convex:deploy && npm run prod:app",
+    "prod:app": "nuxt build && NITRO_HOST=0.0.0.0 NITRO_PORT=31899 PORT=31899 node .output/server/index.mjs",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "convex:dev": "convex dev",
