@@ -35,5 +35,7 @@ describe("PresenceList", () => {
     expect(wrapper.text()).toContain("Active: 1 / 2");
     expect(wrapper.text()).toContain("Main driver");
     expect(wrapper.text()).toContain("inactive (1m ago)");
+    expect(wrapper.text()).not.toContain("s1");
+    expect(wrapper.text()).not.toContain("s2");
   });
 });

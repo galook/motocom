@@ -171,7 +171,6 @@ onMounted(() => {
       <p class="muted">
         Create a room with an auto-generated code or join one of the currently active rooms.
       </p>
-      <p class="muted">Session: {{ sessionId || 'initializing...' }}</p>
       <p v-if="connectionWarning" class="error">{{ connectionWarning }}</p>
     </section>
 

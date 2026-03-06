@@ -6,6 +6,7 @@ defineProps<{
   isMainDriver: boolean;
   isResolving: boolean;
   queueLength: number;
+  requesterName?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -26,7 +27,7 @@ const emit = defineEmits<{
       <p class="active-panel__line">
         <strong>{{ activeRequest.buttonLabel }}</strong>
       </p>
-      <p class="muted active-panel__line">Requested by: {{ activeRequest.requestedBySessionId }}</p>
+      <p class="muted active-panel__line">Requested by: {{ requesterName ?? "Unknown rider" }}</p>
 
       <div class="row active-panel__actions" v-if="isMainDriver">
         <button

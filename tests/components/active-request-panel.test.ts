@@ -29,6 +29,7 @@ describe("ActiveRequestPanel", () => {
           createdAt: Date.now(),
           activatedAt: Date.now(),
         },
+        requesterName: "Alex",
         isMainDriver: true,
         isResolving: false,
         queueLength: 0,
@@ -40,6 +41,8 @@ describe("ActiveRequestPanel", () => {
     await buttons[1].trigger("click");
 
     expect(wrapper.emitted("resolve")).toEqual([["accepted"], ["rejected"]]);
+    expect(wrapper.text()).toContain("Requested by: Alex");
+    expect(wrapper.text()).not.toContain("Requested by: abc");
   });
 
   it("hides action buttons for non-main drivers", () => {

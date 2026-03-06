@@ -22,10 +22,14 @@ const isClaiming = ref(false);
 const connectionWarning = computed(() => buildConnectivityHint(convexUrl));
 const APP_LOCKED_MESSAGE = "Tap the speaker icon to unlock audio before using the app.";
 const RESOLUTION_FEEDBACK_MS = 3_500;
+const AUDIO_AVAILABILITY_POLL_MS = 900;
 
-const { isUnlocked, isUnlocking, unlockAudio, queuePlayback } = useAudioUnlock(convexUrl);
+const { isUnlocked, isUnlocking, unlockAudio, refreshAudioAvailability, queuePlayback } = useAudioUnlock(convexUrl);
+const { isWakeLockSupported, isWakeLockActive } = useScreenWakeLock();
+const { systemDiagnosticsLog, clearSystemDiagnosticsLog } = useSystemDiagnosticsLog();
 const feedbackNow = ref(Date.now());
 let feedbackTicker: ReturnType<typeof setInterval> | null = null;
+let audioAvailabilityTicker: ReturnType<typeof setInterval> | null = null;
 
 const roomQueryArgs = computed(() => ({
   roomCode: roomCode.value,
@@ -40,8 +44,7 @@ const { data: roomData, isPending: roomPending } = useConvexQuery(
 const roomState = computed(() => (roomData.value ?? null) as RoomState | null);
 const roomId = computed(() => roomState.value?.room.id ?? null);
 const hasActiveRequest = computed(() => Boolean(roomState.value?.activeRequest));
-const hasQueuedRequests = computed(() => (roomState.value?.queue.length ?? 0) > 0);
-const showLiveRequestDock = computed(() => hasActiveRequest.value && hasQueuedRequests.value);
+const showLiveRequestDock = computed(() => hasActiveRequest.value);
 const buttonStates = computed<Record<string, ButtonVisualState>>(() => {
   const state = roomState.value;
   if (!state) {
@@ -83,6 +86,39 @@ const participantRecord = computed(() =>
   roomState.value?.participants.find((participant) => participant.sessionId === sessionId.value) ?? null,
 );
 const joinedInRoom = computed(() => participantRecord.value != null);
+const participantNameBySessionId = computed<Record<string, string>>(() => {
+  const mapping: Record<string, string> = {};
+  for (const participant of roomState.value?.participants ?? []) {
+    mapping[participant.sessionId] = participant.displayName;
+  }
+  return mapping;
+});
+const currentDisplayName = computed(() => {
+  const joinedName = participantRecord.value?.displayName?.trim();
+  if (joinedName) {
+    return joinedName;
+  }
+
+  const localName = localDisplayName.value.trim();
+  return localName || null;
+});
+
+const resolveParticipantName = (targetSessionId: string | null | undefined) => {
+  if (!targetSessionId) {
+    return "Unknown rider";
+  }
+
+  const knownName = participantNameBySessionId.value[targetSessionId];
+  if (knownName) {
+    return knownName;
+  }
+
+  if (targetSessionId === sessionId.value && currentDisplayName.value) {
+    return currentDisplayName.value;
+  }
+
+  return "Unknown rider";
+};
 
 const clearMessages = () => {
   pageError.value = "";
@@ -302,6 +338,14 @@ const eventLabel = (event: RoomState["events"][number]) => {
   return event.decision === "accepted" ? "Accepted active request" : "Rejected active request";
 };
 
+const onVisibilityChange = () => {
+  if (!process.client || document.visibilityState !== "visible") {
+    return;
+  }
+
+  refreshAudioAvailability();
+};
+
 onMounted(() => {
   if (!process.client) {
     return;
@@ -315,12 +359,30 @@ onMounted(() => {
   if (storedName) {
     localDisplayName.value = storedName;
   }
+
+  refreshAudioAvailability();
+  audioAvailabilityTicker = window.setInterval(() => {
+    if (!isUnlocked.value) {
+      return;
+    }
+    refreshAudioAvailability();
+  }, AUDIO_AVAILABILITY_POLL_MS);
+  document.addEventListener("visibilitychange", onVisibilityChange);
 });
 
 onUnmounted(() => {
   if (feedbackTicker) {
     clearInterval(feedbackTicker);
     feedbackTicker = null;
+  }
+
+  if (audioAvailabilityTicker) {
+    clearInterval(audioAvailabilityTicker);
+    audioAvailabilityTicker = null;
+  }
+
+  if (process.client) {
+    document.removeEventListener("visibilitychange", onVisibilityChange);
   }
 });
 </script>
@@ -380,16 +442,45 @@ onUnmounted(() => {
     </section>
 
     <section class="card room-topbar">
-      <div>
-        <h1>{{ roomState?.room.name ?? `Room ${roomCode}` }}</h1>
-        <p class="muted">Code: {{ roomCode }}</p>
-      </div>
-      <div class="row room-topbar__actions">
-        <button class="secondary" @click="showSettings = !showSettings">
-          {{ showSettings ? 'Hide Settings' : 'Show Settings' }}
-        </button>
-        <NuxtLink class="muted topbar-link" to="/">Back</NuxtLink>
-      </div>
+      <NuxtLink class="room-topbar__icon-link" to="/" aria-label="Back to rooms">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M14.5 5.5L8 12l6.5 6.5M9 12h11"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+          />
+        </svg>
+      </NuxtLink>
+      <h1 class="room-topbar__title">{{ roomState?.room.name ?? `Room ${roomCode}` }}</h1>
+      <button
+        type="button"
+        class="room-topbar__icon-button"
+        :class="{ 'room-topbar__icon-button--active': showSettings }"
+        :aria-label="showSettings ? 'Hide settings' : 'Show settings'"
+        @click="showSettings = !showSettings"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M12 4v2m0 12v2M4 12h2m12 0h2M6.3 6.3l1.4 1.4m8.6 8.6 1.4 1.4m-11.4 0 1.4-1.4m8.6-8.6 1.4-1.4"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+          />
+          <circle
+            cx="12"
+            cy="12"
+            r="3.2"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          />
+        </svg>
+      </button>
     </section>
 
     <section v-if="connectionWarning" class="card">
@@ -407,7 +498,6 @@ onUnmounted(() => {
 
     <template v-else>
       <section class="card soundboard-card">
-        <h2>Soundboard</h2>
         <p class="muted" v-if="!isUnlocked">
           {{ APP_LOCKED_MESSAGE }}
         </p>
@@ -425,19 +515,9 @@ onUnmounted(() => {
         />
       </section>
 
-      <section v-if="hasActiveRequest && !showLiveRequestDock" class="card inline-active-panel">
-        <ActiveRequestPanel
-          :active-request="roomState.activeRequest"
-          :is-main-driver="roomState.isMainDriver"
-          :is-resolving="Boolean(connectionWarning) || !isUnlocked || isResolving"
-          :queue-length="roomState.queue.length"
-          @resolve="resolveActiveRequest"
-        />
-      </section>
-
       <section class="card" v-if="showSettings">
         <h2>Settings</h2>
-        <p class="muted">Session: {{ sessionId }}</p>
+        <p class="muted">You: {{ currentDisplayName ?? "not set" }}</p>
         <p class="muted" v-if="participantRecord">
           Role:
           <span class="badge" :class="participantRecord.isMainDriver ? 'ok' : 'off'">
@@ -480,7 +560,7 @@ onUnmounted(() => {
           <p v-if="!roomState.queue.length" class="muted">Queue is empty.</p>
           <ul class="history" v-else>
             <li v-for="queued in roomState.queue" :key="queued.id">
-              <strong>{{ queued.buttonLabel }}</strong> requested by {{ queued.requestedBySessionId }} at
+              <strong>{{ queued.buttonLabel }}</strong> requested by {{ resolveParticipantName(queued.requestedBySessionId) }} at
               {{ formatTime(queued.createdAt) }}
             </li>
           </ul>
@@ -491,8 +571,54 @@ onUnmounted(() => {
           <p v-if="!roomState.events.length" class="muted">No events yet.</p>
           <ul class="history" v-else>
             <li v-for="event in roomState.events" :key="event.seq">
-              #{{ event.seq }} · {{ eventLabel(event) }} · {{ event.actorSessionId }} ·
+              #{{ event.seq }} · {{ eventLabel(event) }} · {{ resolveParticipantName(event.actorSessionId) }} ·
               {{ formatTime(event.createdAt) }}
+            </li>
+          </ul>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-log-header">
+            <h3>Audio &amp; NoSleep Log</h3>
+            <button
+              type="button"
+              class="secondary settings-log__clear"
+              :disabled="!systemDiagnosticsLog.length"
+              @click="clearSystemDiagnosticsLog"
+            >
+              Clear
+            </button>
+          </div>
+          <p class="muted settings-log__status-line">
+            Audio:
+            <span class="badge" :class="isUnlocked ? 'ok' : 'off'">
+              {{ isUnlocked ? 'unlocked' : isUnlocking ? 'unlocking' : 'locked' }}
+            </span>
+            NoSleep:
+            <span class="badge" :class="isWakeLockActive ? 'ok' : 'off'">
+              {{
+                !isWakeLockSupported
+                  ? 'unsupported'
+                  : isWakeLockActive
+                    ? 'active'
+                    : 'inactive'
+              }}
+            </span>
+          </p>
+          <p v-if="!systemDiagnosticsLog.length" class="muted">No status or error entries yet.</p>
+          <ul v-else class="history settings-log">
+            <li
+              v-for="entry in systemDiagnosticsLog"
+              :key="entry.id"
+              class="settings-log__entry"
+              :class="entry.level === 'error' ? 'settings-log__entry--error' : 'settings-log__entry--status'"
+            >
+              <span class="settings-log__meta">
+                {{ formatTime(entry.createdAt) }} · {{ entry.scope === 'audio' ? 'Audio' : 'NoSleep' }} ·
+                {{ entry.level === 'error' ? 'error' : 'status' }}
+              </span>
+              <span>{{ entry.message }}</span>
+              <span v-if="entry.detail" class="muted settings-log__detail">{{ entry.detail }}</span>
             </li>
           </ul>
         </section>
@@ -518,6 +644,7 @@ onUnmounted(() => {
           :is-main-driver="roomState.isMainDriver"
           :is-resolving="Boolean(connectionWarning) || !isUnlocked || isResolving"
           :queue-length="roomState.queue.length"
+          :requester-name="resolveParticipantName(roomState.activeRequest?.requestedBySessionId)"
           @resolve="resolveActiveRequest"
         />
       </section>
@@ -543,26 +670,60 @@ onUnmounted(() => {
 
 .room-topbar {
   align-items: center;
-  display: flex;
-  justify-content: space-between;
-  gap: 0.8rem;
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 0.55rem 0.65rem;
 }
 
-.room-topbar__actions {
-  align-items: center;
+.room-topbar__title {
+  font-size: 1.08rem;
+  line-height: 1.2;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.topbar-link {
+.room-topbar__icon-link,
+.room-topbar__icon-button {
   align-items: center;
+  background: #edf3fb;
+  border: 1px solid #d0dced;
+  border-radius: 11px;
+  color: #355d89;
   display: inline-flex;
+  height: 2rem;
+  justify-content: center;
+  padding: 0;
+  text-decoration: none;
+  width: 2rem;
+}
+
+.room-topbar__icon-link svg,
+.room-topbar__icon-button svg {
+  height: 1rem;
+  width: 1rem;
+}
+
+.room-topbar__icon-button {
+  cursor: pointer;
+}
+
+.room-topbar__icon-link:hover,
+.room-topbar__icon-button:hover {
+  transform: translateY(-1px);
+}
+
+.room-topbar__icon-button--active {
+  background: #dce8f7;
+  border-color: #7ea2cb;
+  color: #1e4d83;
 }
 
 .soundboard-card {
-  margin-top: 0.5rem;
-}
-
-.inline-active-panel {
-  margin-top: 0.8rem;
+  margin-top: 0.35rem;
+  padding: 0.8rem;
 }
 
 .audio-icon-button {
@@ -635,6 +796,70 @@ onUnmounted(() => {
   margin-bottom: 0.42rem;
 }
 
+.settings-log-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: space-between;
+}
+
+.settings-log__clear {
+  border-radius: 9px;
+  font-size: 0.78rem;
+  padding: 0.4rem 0.7rem;
+}
+
+.settings-log__status-line {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0.6rem 0 0.7rem;
+}
+
+.settings-log {
+  list-style: none;
+  margin: 0;
+  max-height: 16rem;
+  overflow: auto;
+  padding-left: 0;
+}
+
+.settings-log__entry {
+  background: #f7fbff;
+  border: 1px solid #d4e0ef;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+}
+
+.settings-log__entry + .settings-log__entry {
+  margin-top: 0.45rem;
+}
+
+.settings-log__entry--status {
+  border-color: #c8d7eb;
+}
+
+.settings-log__entry--error {
+  background: #fff7f7;
+  border-color: #e6bbbb;
+}
+
+.settings-log__meta {
+  color: #60738c;
+  font-size: 0.75rem;
+}
+
+.settings-log__detail {
+  font-size: 0.82rem;
+  word-break: break-word;
+}
+
 .audio-prompt-banner {
   bottom: 0;
   left: 0;
@@ -693,8 +918,19 @@ onUnmounted(() => {
 
 @media (max-width: 700px) {
   .room-topbar {
-    align-items: flex-start;
-    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.5rem 0.55rem;
+  }
+
+  .room-topbar__title {
+    font-size: 1rem;
+  }
+
+  .room-topbar__icon-link,
+  .room-topbar__icon-button {
+    border-radius: 10px;
+    height: 1.9rem;
+    width: 1.9rem;
   }
 
   .audio-icon-button {
