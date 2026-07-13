@@ -9,7 +9,7 @@ const sampleEvents: RoomEvent[] = [
     requestId: "r1",
     buttonId: "b1",
     decision: null,
-    actorSessionId: "s1",
+    actorParticipantId: "s1",
     createdAt: 100,
   },
   {
@@ -18,7 +18,7 @@ const sampleEvents: RoomEvent[] = [
     requestId: "r1",
     buttonId: "b1",
     decision: "accepted",
-    actorSessionId: "s2",
+    actorParticipantId: "s2",
     createdAt: 200,
   },
   {
@@ -27,7 +27,7 @@ const sampleEvents: RoomEvent[] = [
     requestId: "r2",
     buttonId: "b2",
     decision: null,
-    actorSessionId: "s3",
+    actorParticipantId: "s3",
     createdAt: 300,
   },
 ];

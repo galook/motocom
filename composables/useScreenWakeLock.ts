@@ -7,6 +7,24 @@ type NoSleepInstance = {
   disable: () => void;
 };
 
+type WakeLockRequestOptions = {
+  fromUserGesture?: boolean;
+};
+
+function isWakeLockPermissionError(error: unknown): boolean {
+  const name = (error as { name?: unknown } | null)?.name;
+  if (typeof name === "string" && name === "NotAllowedError") {
+    return true;
+  }
+
+  const message = (error as { message?: unknown } | null)?.message;
+  if (typeof message !== "string") {
+    return false;
+  }
+
+  return /not[\s-]?allowed|permission|denied|user gesture|interaction/i.test(message);
+}
+
 export function useScreenWakeLock() {
   const isWakeLockSupported = ref(false);
   const isWakeLockActive = ref(false);
@@ -15,9 +33,14 @@ export function useScreenWakeLock() {
   let noSleep: NoSleepInstance | null = null;
   let noSleepLoadTried = false;
   let noSleepLoadFailed = false;
+  let noSleepLoadPromise: Promise<NoSleepInstance | null> | null = null;
+  let wakeLockRequestPromise: Promise<boolean> | null = null;
+  let hasUserInteraction = false;
+  let waitingForInteractionLogged = false;
+  let preparingNoSleepLogged = false;
 
   const hasNativeWakeLockApi = () =>
-    process.client && typeof navigator !== "undefined" && "wakeLock" in navigator;
+    Boolean(process.client && typeof navigator !== "undefined" && "wakeLock" in navigator);
 
   const detectNoSleepMode = () => {
     const noSleepAny = noSleep as { _wakeLock?: unknown; noSleepVideo?: unknown } | null;
@@ -43,19 +66,32 @@ export function useScreenWakeLock() {
       return null;
     }
 
+    if (noSleepLoadPromise) {
+      return await noSleepLoadPromise;
+    }
+
     noSleepLoadTried = true;
+    noSleepLoadPromise = (async () => {
+      try {
+        const module = await import("nosleep.js");
+        const NoSleepClass = module.default;
+        noSleep = new NoSleepClass() as unknown as NoSleepInstance;
+        noSleepLoadFailed = false;
+        preparingNoSleepLogged = false;
+        isWakeLockSupported.value = true;
+        return noSleep;
+      } catch (error) {
+        noSleepLoadFailed = true;
+        isWakeLockSupported.value = hasNativeWakeLockApi();
+        logError("nosleep", "Failed to load NoSleep library.", error);
+        return null;
+      }
+    })();
+
     try {
-      const module = await import("nosleep.js");
-      const NoSleepClass = module.default;
-      noSleep = new NoSleepClass() as unknown as NoSleepInstance;
-      noSleepLoadFailed = false;
-      isWakeLockSupported.value = true;
-      return noSleep;
-    } catch (error) {
-      noSleepLoadFailed = true;
-      isWakeLockSupported.value = hasNativeWakeLockApi();
-      logError("nosleep", "Failed to load NoSleep library.", error);
-      return null;
+      return await noSleepLoadPromise;
+    } finally {
+      noSleepLoadPromise = null;
     }
   };
 
@@ -75,12 +111,103 @@ export function useScreenWakeLock() {
     isWakeLockActive.value = false;
   };
 
-  const requestWakeLock = async () => {
+  const noteWaitingForInteraction = () => {
+    if (waitingForInteractionLogged) {
+      return;
+    }
+
+    waitingForInteractionLogged = true;
+    logStatus(
+      "nosleep",
+      "NoSleep is waiting for a user interaction.",
+      "Tap anywhere to enable wake lock on iOS.",
+    );
+  };
+
+  const runWakeLockRequest = (task: () => Promise<boolean>) => {
+    if (wakeLockRequestPromise) {
+      return wakeLockRequestPromise;
+    }
+
+    const inFlight = task().finally(() => {
+      if (wakeLockRequestPromise === inFlight) {
+        wakeLockRequestPromise = null;
+      }
+    });
+    wakeLockRequestPromise = inFlight;
+    return inFlight;
+  };
+
+  const activateWakeLock = (instance: NoSleepInstance, fromUserGesture: boolean) =>
+    runWakeLockRequest(async () => {
+      try {
+        const enableTask = instance.enable();
+        await Promise.resolve(enableTask);
+        isWakeLockActive.value = Boolean(instance.isEnabled);
+        isWakeLockSupported.value = true;
+
+        if (isWakeLockActive.value) {
+          waitingForInteractionLogged = false;
+          logStatus("nosleep", "NoSleep is active.", detectNoSleepMode());
+        }
+
+        return isWakeLockActive.value;
+      } catch (error) {
+        isWakeLockActive.value = false;
+
+        if (isWakeLockPermissionError(error)) {
+          if (!fromUserGesture) {
+            noteWaitingForInteraction();
+            return false;
+          }
+
+          logError(
+            "nosleep",
+            "NoSleep enable failed.",
+            error,
+            "Wake lock denied on iOS. Try tapping again and disable Low Power Mode.",
+          );
+          return false;
+        }
+
+        logError("nosleep", "NoSleep enable failed.", error);
+        return false;
+      }
+    });
+
+  const requestWakeLock = async (options: WakeLockRequestOptions = {}) => {
+    const fromUserGesture = Boolean(options.fromUserGesture);
+
     if (!process.client || !shouldKeepAwake) {
       return false;
     }
 
     if (document.visibilityState !== "visible") {
+      return false;
+    }
+
+    if (fromUserGesture) {
+      hasUserInteraction = true;
+      waitingForInteractionLogged = false;
+    } else if (!hasUserInteraction && !isWakeLockActive.value) {
+      noteWaitingForInteraction();
+      return false;
+    }
+
+    if (noSleep) {
+      return await activateWakeLock(noSleep, fromUserGesture);
+    }
+
+    if (fromUserGesture) {
+      void ensureNoSleep();
+      if (!preparingNoSleepLogged) {
+        preparingNoSleepLogged = true;
+        logStatus(
+          "nosleep",
+          "Preparing NoSleep.",
+          "Tap again if wake lock stays inactive.",
+        );
+      }
       return false;
     }
 
@@ -90,21 +217,7 @@ export function useScreenWakeLock() {
       return false;
     }
 
-    try {
-      await instance.enable();
-      isWakeLockActive.value = Boolean(instance.isEnabled);
-      isWakeLockSupported.value = true;
-
-      if (isWakeLockActive.value) {
-        logStatus("nosleep", "NoSleep is active.", detectNoSleepMode());
-      }
-
-      return isWakeLockActive.value;
-    } catch (error) {
-      isWakeLockActive.value = false;
-      logError("nosleep", "NoSleep enable failed.", error);
-      return false;
-    }
+    return await activateWakeLock(instance, fromUserGesture);
   };
 
   const onVisibilityChange = () => {
@@ -113,7 +226,9 @@ export function useScreenWakeLock() {
     }
 
     if (document.visibilityState === "visible") {
-      void requestWakeLock();
+      if (hasUserInteraction || isWakeLockActive.value) {
+        void requestWakeLock();
+      }
       return;
     }
 
@@ -125,7 +240,7 @@ export function useScreenWakeLock() {
       return;
     }
 
-    void requestWakeLock();
+    void requestWakeLock({ fromUserGesture: true });
   };
 
   onMounted(() => {
@@ -138,7 +253,7 @@ export function useScreenWakeLock() {
     window.addEventListener("pointerdown", onUserInteraction, { passive: true });
     window.addEventListener("touchstart", onUserInteraction, { passive: true });
     window.addEventListener("keydown", onUserInteraction);
-    void requestWakeLock();
+    void ensureNoSleep();
   });
 
   onUnmounted(() => {

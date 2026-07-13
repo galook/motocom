@@ -77,16 +77,44 @@ function resolveConvexUrl(rawUrl?: string): string {
   return normalizeConvexUrl(parsedUrl);
 }
 
+function resolveDefaultConvexPublicUrl(
+  rawConfiguredUrl: string,
+  resolvedInternalUrl: string,
+  publicHost: string,
+): string {
+  if (!rawConfiguredUrl) {
+    return isLoopbackHostname(publicHost) ? resolvedInternalUrl : "/convex";
+  }
+
+  if (isLoopbackHostname(publicHost)) {
+    return resolvedInternalUrl;
+  }
+
+  try {
+    const parsedUrl = new URL(resolvedInternalUrl);
+    if (parsedUrl.protocol === "https:") {
+      return normalizeConvexUrl(parsedUrl);
+    }
+  } catch {
+    return resolvedInternalUrl;
+  }
+
+  // Non-loopback hosts served over HTTPS cannot call insecure Convex URLs directly.
+  return "/convex";
+}
+
 const rawConvexUrl = process.env.CONVEX_URL?.trim() ?? "";
 const fallbackConvexUrl = "http://127.0.0.1:3210";
 const resolvedConvexInternalUrl = rawConvexUrl
   ? resolveConvexUrl(rawConvexUrl)
   : fallbackConvexUrl;
 const convexConfigured = rawConvexUrl.length > 0;
-const devPublicHost = (process.env.DEV_PUBLIC_HOST || "moto.okbaselight.com").trim();
-const defaultConvexPublicUrl = isLoopbackHostname(devPublicHost)
-  ? resolvedConvexInternalUrl
-  : "/convex";
+const devPublicHost = (process.env.DEV_PUBLIC_HOST || "moto.aoo.cz").trim();
+const defaultConvexPublicUrl = resolveDefaultConvexPublicUrl(
+  rawConvexUrl,
+  resolvedConvexInternalUrl,
+  devPublicHost,
+);
 const resolvedConvexPublicUrl = (process.env.CONVEX_PUBLIC_URL || defaultConvexPublicUrl).trim();
 
 function resolveConvexModuleUrl(publicUrl: string, fallbackUrl: string, host: string): string {
@@ -225,6 +253,7 @@ export default defineNuxtConfig({
     workbox: {
       cleanupOutdatedCaches: true,
       globPatterns: ["**/*.{js,css,html,ico,png,svg,json,woff2}"],
+      navigateFallback: null,
     },
     devOptions: {
       enabled: false,

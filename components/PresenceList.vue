@@ -24,7 +24,7 @@ const formatAgo = (timestamp: number) => {
     </p>
 
     <ul class="presence-list">
-      <li v-for="participant in participants" :key="participant.sessionId" class="presence-row">
+      <li v-for="participant in participants" :key="participant.id" class="presence-row">
         <div>
           <strong>{{ participant.displayName }}</strong>
           <span v-if="participant.isMainDriver" class="badge ok role-badge">Main driver</span>

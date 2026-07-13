@@ -4,9 +4,8 @@ import { planPlayback } from "~/utils/playback";
 
 export function useEventPlayback(
   roomState: Ref<RoomState | null>,
-  sessionId: Ref<string>,
   audioUnlocked: Ref<boolean>,
-  queuePlayback: (url: string | null) => void,
+  queuePlayback: (url: string | null, createdAt?: number, eventSeq?: number) => void,
 ) {
   const lastSeqByRoom = useState<Record<string, number>>(
     "event-last-seq-by-room",
@@ -22,7 +21,6 @@ export function useEventPlayback(
 
       const roomId = state.room.id;
       const roomLatestSeq = latestSeq(state.events);
-
       if (lastSeqByRoom.value[roomId] == null) {
         // Baseline on first load to avoid replaying historical events.
         lastSeqByRoom.value[roomId] = roomLatestSeq;
@@ -36,21 +34,19 @@ export function useEventPlayback(
       }
 
       const selfParticipant = state.participants.find(
-        (participant) => participant.sessionId === sessionId.value,
+        (participant) => participant.id === state.currentParticipantId,
       );
-
       const playback = planPlayback({
         events: state.events,
         lastSeq,
-        sessionId: sessionId.value,
-        audioUnlocked: audioUnlocked.value,
+        currentParticipantId: state.currentParticipantId,
         selfIsActive: Boolean(selfParticipant?.isActive),
         buttons: state.buttons,
         outcomeSounds: state.outcomeSounds,
       });
 
-      for (const url of playback.urls) {
-        queuePlayback(url);
+      for (const item of playback.items) {
+        queuePlayback(item.url, item.createdAt, item.eventSeq);
       }
 
       lastSeqByRoom.value[roomId] = playback.nextSeq;

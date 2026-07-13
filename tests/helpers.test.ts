@@ -10,9 +10,15 @@ describe("helpers", () => {
     expect(normalizeRoomCode("  ride 01 ")).toBe("RIDE01");
   });
 
-  it("hashes identical pin values to the same stable hash", () => {
-    expect(hashPin("1234")).toBe(hashPin("1234"));
-    expect(hashPin("1234")).not.toBe(hashPin("4321"));
+  it("hashes identical pin values and salts deterministically", async () => {
+    const first = await hashPin("123456", "salt-a");
+    const second = await hashPin("123456", "salt-a");
+    const differentPin = await hashPin("654321", "salt-a");
+    const differentSalt = await hashPin("123456", "salt-b");
+
+    expect(first).toBe(second);
+    expect(first).not.toBe(differentPin);
+    expect(first).not.toBe(differentSalt);
   });
 
   it("marks participant active when heartbeat is within timeout", () => {

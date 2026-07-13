@@ -4,25 +4,25 @@ import { runMutation } from "~/utils/mutation";
 
 export function usePresence(
   roomId: Ref<string | null>,
-  sessionId: Ref<string>,
+  participantToken: Ref<string>,
   audioUnlocked: Ref<boolean>,
 ) {
   const { mutate } = useConvexMutation(api.rooms.heartbeat);
   let timer: ReturnType<typeof setInterval> | null = null;
 
   const sendHeartbeat = async () => {
-    if (!roomId.value) {
+    if (!roomId.value || !participantToken.value) {
       return;
     }
 
     try {
       await runMutation(mutate, {
         roomId: roomId.value,
-        sessionId: sessionId.value,
+        participantToken: participantToken.value,
         audioUnlocked: audioUnlocked.value,
       });
     } catch {
-      // Ignore heartbeat failures and retry on the next interval.
+      // Ignore transient heartbeat failures and retry on the next interval.
     }
   };
 
@@ -35,7 +35,7 @@ export function usePresence(
 
   const start = () => {
     stop();
-    if (!process.client || !roomId.value) {
+    if (!process.client || !roomId.value || !participantToken.value) {
       return;
     }
     void sendHeartbeat();
@@ -45,16 +45,16 @@ export function usePresence(
   };
 
   watch(
-    () => [roomId.value, audioUnlocked.value],
+    () => [roomId.value, participantToken.value, audioUnlocked.value],
     () => {
-      if (roomId.value) {
+      if (roomId.value && participantToken.value) {
         start();
+      } else {
+        stop();
       }
     },
     { immediate: true },
   );
 
-  onUnmounted(() => {
-    stop();
-  });
+  onUnmounted(stop);
 }

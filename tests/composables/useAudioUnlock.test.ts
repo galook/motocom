@@ -28,11 +28,12 @@ function createWebAudioContextMock(options?: {
   const decodePlan = options?.decodePlan ?? [];
 
   const contexts: any[] = [];
+  const gains: any[] = [];
   let resumeIndex = 0;
   let playIndex = 0;
   let decodeIndex = 0;
 
-  const ctor = vi.fn().mockImplementation(() => {
+  const ctor = vi.fn(function AudioContextMock() {
     const context: any = {
       state: "suspended",
       sampleRate: 44_100,
@@ -63,6 +64,15 @@ function createWebAudioContextMock(options?: {
         }
 
         return Promise.resolve({ duration: 0.1 });
+      }),
+      createGain: vi.fn(() => {
+        const gainNode: any = {
+          gain: { value: 1 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        };
+        gains.push(gainNode);
+        return gainNode;
       }),
       createBufferSource: vi.fn(() => {
         const source: any = {
@@ -101,6 +111,7 @@ function createWebAudioContextMock(options?: {
   return {
     ctor,
     contexts,
+    gains,
   };
 }
 
@@ -131,6 +142,7 @@ describe("useAudioUnlock", () => {
   beforeEach(() => {
     (process as any).client = true;
     installStateMocks();
+    window.localStorage.clear();
   });
 
   afterEach(() => {
@@ -189,6 +201,28 @@ describe("useAudioUnlock", () => {
     expect(webAudioMock.contexts[0].createBufferSource).toHaveBeenCalledTimes(3);
   });
 
+  it("defaults playback volume to 150% and allows changing it", async () => {
+    vi.useFakeTimers();
+    const webAudioMock = createWebAudioContextMock();
+    installFetchMock();
+    (window as any).AudioContext = webAudioMock.ctor;
+
+    const composable = useAudioUnlock();
+    expect(composable.playbackVolume.value).toBe(1.5);
+
+    composable.setPlaybackVolume(0.8);
+    expect(composable.playbackVolume.value).toBe(0.8);
+
+    const unlockTask = composable.unlockAudio();
+    await vi.advanceTimersByTimeAsync(300);
+    await unlockTask;
+    composable.queuePlayback("first.mp3");
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(webAudioMock.gains.at(-1)?.gain.value).toBeCloseTo(0.8);
+  });
+
   it("keeps queue moving when first playback never ends", async () => {
     vi.useFakeTimers();
     const webAudioMock = createWebAudioContextMock({
@@ -208,7 +242,24 @@ describe("useAudioUnlock", () => {
 
     expect(fetchState.calls.some((url) => url.includes("first.mp3"))).toBe(true);
     expect(fetchState.calls.some((url) => url.includes("second.mp3"))).toBe(true);
-    expect(webAudioMock.contexts[0].createBufferSource).toHaveBeenCalledTimes(3);
+    expect(webAudioMock.contexts[0].createBufferSource).toHaveBeenCalledTimes(2);
+  });
+
+  it("discards stale playback instead of replaying obsolete ride events", async () => {
+    vi.useFakeTimers();
+    const webAudioMock = createWebAudioContextMock();
+    const fetchState = installFetchMock();
+    (window as any).AudioContext = webAudioMock.ctor;
+
+    const composable = useAudioUnlock();
+    composable.queuePlayback("stale.mp3", Date.now(), 42);
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    const unlockTask = composable.unlockAudio();
+    await vi.advanceTimersByTimeAsync(300);
+    await unlockTask;
+
+    expect(fetchState.calls.some((url) => url.includes("stale.mp3"))).toBe(false);
   });
 
   it("re-locks audio after NotAllowed playback failures", async () => {

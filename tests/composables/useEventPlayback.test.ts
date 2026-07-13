@@ -30,7 +30,7 @@ function buildRoomState(events: RoomState["events"]): RoomState {
     queue: [],
     participants: [
       {
-        sessionId: "self",
+        id: "self",
         displayName: "Self",
         isMainDriver: false,
         lastSeenAt: Date.now(),
@@ -41,6 +41,7 @@ function buildRoomState(events: RoomState["events"]): RoomState {
       acceptUrl: "accept.mp3",
       rejectUrl: "reject.mp3",
     },
+    currentParticipantId: "self",
     isMainDriver: false,
     events,
   };
@@ -55,7 +56,7 @@ describe("useEventPlayback", () => {
     const roomState = ref<RoomState | null>(null);
     const queuePlayback = vi.fn();
 
-    useEventPlayback(roomState, ref("self"), ref(true), queuePlayback);
+    useEventPlayback(roomState, ref(true), queuePlayback);
 
     roomState.value = buildRoomState([
       {
@@ -64,7 +65,7 @@ describe("useEventPlayback", () => {
         requestId: "r1",
         buttonId: "b1",
         decision: null,
-        actorSessionId: "other",
+        actorParticipantId: "other",
         createdAt: 1,
       },
     ]);
@@ -77,7 +78,7 @@ describe("useEventPlayback", () => {
     const roomState = ref<RoomState | null>(null);
     const queuePlayback = vi.fn();
 
-    useEventPlayback(roomState, ref("self"), ref(true), queuePlayback);
+    useEventPlayback(roomState, ref(true), queuePlayback);
 
     roomState.value = buildRoomState([]);
     await nextTick();
@@ -89,7 +90,7 @@ describe("useEventPlayback", () => {
         requestId: "r1",
         buttonId: "b1",
         decision: null,
-        actorSessionId: "other",
+        actorParticipantId: "other",
         createdAt: 1,
       },
       {
@@ -98,7 +99,7 @@ describe("useEventPlayback", () => {
         requestId: "r1",
         buttonId: "b1",
         decision: "accepted",
-        actorSessionId: "other",
+        actorParticipantId: "other",
         createdAt: 2,
       },
       {
@@ -107,7 +108,7 @@ describe("useEventPlayback", () => {
         requestId: "r1",
         buttonId: "b1",
         decision: "rejected",
-        actorSessionId: "self",
+        actorParticipantId: "self",
         createdAt: 3,
       },
     ]);
@@ -115,7 +116,7 @@ describe("useEventPlayback", () => {
     await nextTick();
 
     expect(queuePlayback).toHaveBeenCalledTimes(2);
-    expect(queuePlayback).toHaveBeenNthCalledWith(1, "horn.mp3");
-    expect(queuePlayback).toHaveBeenNthCalledWith(2, "accept.mp3");
+    expect(queuePlayback).toHaveBeenNthCalledWith(1, "horn.mp3", 1, 1);
+    expect(queuePlayback).toHaveBeenNthCalledWith(2, "accept.mp3", 2, 2);
   });
 });

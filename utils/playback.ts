@@ -3,8 +3,7 @@ import type { RoomButton, RoomEvent } from "../types/soundboard";
 export interface PlaybackPlanInput {
   events: RoomEvent[];
   lastSeq: number;
-  sessionId: string;
-  audioUnlocked: boolean;
+  currentParticipantId: string | null;
   selfIsActive: boolean;
   buttons: RoomButton[];
   outcomeSounds: {
@@ -13,40 +12,45 @@ export interface PlaybackPlanInput {
   };
 }
 
+export interface PlannedPlaybackItem {
+  url: string;
+  createdAt: number;
+  eventSeq: number;
+}
+
 export interface PlaybackPlan {
   nextSeq: number;
-  urls: string[];
+  items: PlannedPlaybackItem[];
 }
 
 export function planPlayback(input: PlaybackPlanInput): PlaybackPlan {
   const freshEvents = input.events.filter((event) => event.seq > input.lastSeq);
   if (!freshEvents.length) {
-    return {
-      nextSeq: input.lastSeq,
-      urls: [],
-    };
+    return { nextSeq: input.lastSeq, items: [] };
   }
 
   const nextSeq = freshEvents[freshEvents.length - 1].seq;
-
   if (!input.selfIsActive) {
-    return {
-      nextSeq,
-      urls: [],
-    };
+    return { nextSeq, items: [] };
   }
 
-  const urls: string[] = [];
-
+  const items: PlannedPlaybackItem[] = [];
   for (const event of freshEvents) {
-    if (event.actorSessionId === input.sessionId) {
+    if (
+      input.currentParticipantId &&
+      event.actorParticipantId === input.currentParticipantId
+    ) {
       continue;
     }
 
     if (event.type === "request_started") {
       const button = input.buttons.find((candidate) => candidate.id === event.buttonId);
       if (button?.soundUrl) {
-        urls.push(button.soundUrl);
+        items.push({
+          url: button.soundUrl,
+          createdAt: event.createdAt,
+          eventSeq: event.seq,
+        });
       }
       continue;
     }
@@ -56,12 +60,13 @@ export function planPlayback(input: PlaybackPlanInput): PlaybackPlan {
         ? input.outcomeSounds.acceptUrl
         : input.outcomeSounds.rejectUrl;
     if (outcomeUrl) {
-      urls.push(outcomeUrl);
+      items.push({
+        url: outcomeUrl,
+        createdAt: event.createdAt,
+        eventSeq: event.seq,
+      });
     }
   }
 
-  return {
-    nextSeq,
-    urls,
-  };
+  return { nextSeq, items };
 }

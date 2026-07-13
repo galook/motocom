@@ -34,7 +34,7 @@ describe("useSessionId", () => {
         },
       },
       crypto: {
-        randomUUID: () => "default-uuid",
+        randomUUID: () => "00000000-0000-4000-8000-000000000000",
       },
     };
   });
@@ -47,7 +47,7 @@ describe("useSessionId", () => {
 
   it("uses stored session id", () => {
     installUseStateMock();
-    window.localStorage.setItem("motocom.session-id", "stored-id");
+    window.localStorage.setItem("motocom.owner-token.v2", "stored-id");
 
     const session = useSessionId();
 
@@ -56,11 +56,15 @@ describe("useSessionId", () => {
 
   it("creates and stores a new session id when none exists", () => {
     installUseStateMock();
-    vi.spyOn(window.crypto, "randomUUID").mockReturnValue("new-id");
+    vi.spyOn(window.crypto, "randomUUID").mockReturnValue(
+      "11111111-1111-4111-8111-111111111111",
+    );
 
     const session = useSessionId();
 
-    expect(session.value).toBe("new-id");
-    expect(window.localStorage.getItem("motocom.session-id")).toBe("new-id");
+    expect(session.value).toBe("11111111-1111-4111-8111-111111111111");
+    expect(window.localStorage.getItem("motocom.owner-token.v2")).toBe(
+      "11111111-1111-4111-8111-111111111111",
+    );
   });
 });

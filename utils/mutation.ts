@@ -185,7 +185,7 @@ export function rewriteLoopbackUrlForClient(
 }
 
 export async function runMutation<TInput, TOutput>(
-  mutate: (args: TInput) => Promise<unknown>,
+  mutate: (args: any) => Promise<unknown>,
   args: TInput,
   options?: RunMutationOptions,
 ): Promise<TOutput> {

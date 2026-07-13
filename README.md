@@ -3,14 +3,16 @@
 Nuxt + Convex app for synchronized motorcycle group sound requests.
 
 ## Features
-- Room create/join with anonymous session IDs.
-- Main-driver role claim via room PIN.
+- Private room create/join with per-room authorization tokens stored only as hashes.
+- Main-driver role claim via salted PBKDF2 PIN verification and attempt lockout.
 - 2-column sound button grid with multiple rows.
 - FIFO request queue (max 20) with auto-promotion.
 - Main-driver accept/reject flow and outcome sounds.
 - Presence heartbeat and active/inactive participant state.
 - Event playback sync excluding local sender/resolver audio.
 - Upload sources can be audio (`.m4a` included) or video (`.mov/.mp4`), using the media audio track for playback.
+- Upload size/duration limits, bounded playback/cache behavior, idempotent retries, and reference-aware media cleanup.
+- Daily cleanup of rooms inactive for more than seven days.
 - PWA enabled (service worker, installable manifest, iOS/Android home screen icons).
 
 ## Quick Start
@@ -21,9 +23,10 @@ Nuxt + Convex app for synchronized motorcycle group sound requests.
 5. Start Nuxt: `npm run dev`.
 6. Server-mapped dev mode for Apache (`motocom.aoo.cz -> :31900`): `npm run dev:motocom`.
 7. Run tests: `npm run test` (coverage: `npm run test:coverage`).
-8. One-command production deploy + build + run on port `31899`: `npm run prod`.
-9. Apache-targeted production start (`moto.aoo.cz -> :31899`): `npm run prod:moto`.
-10. `npm run prod` runs `convex deploy` first, so ensure Convex auth/deploy credentials are configured in the environment.
+8. Run static type checking: `npm run typecheck`.
+9. One-command production deploy + build + run on port `31899`: `npm run prod`.
+10. Apache-targeted production start (`moto.aoo.cz -> :31899`): `npm run prod:moto`.
+11. `npm run prod` runs `convex deploy` first, so ensure Convex auth/deploy credentials are configured in the environment.
 
 ## PWA Usage
 - Open the app in browser and use `Add to Home Screen` / `Install app`.

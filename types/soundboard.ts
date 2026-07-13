@@ -9,11 +9,19 @@ export interface RoomButton {
   soundUrl: string | null;
 }
 
+export interface RoomTemplateSummary {
+  id: string;
+  name: string;
+  buttonCount: number;
+  hasOutcomeSounds: boolean;
+  updatedAt: number;
+}
+
 export interface ActiveRequest {
   id: string;
   buttonId: string;
   buttonLabel: string;
-  requestedBySessionId: string;
+  requestedByParticipantId: string | null;
   createdAt: number;
   activatedAt: number | null;
 }
@@ -22,12 +30,12 @@ export interface QueueRequest {
   id: string;
   buttonId: string;
   buttonLabel: string;
-  requestedBySessionId: string;
+  requestedByParticipantId: string | null;
   createdAt: number;
 }
 
 export interface Participant {
-  sessionId: string;
+  id: string;
   displayName: string;
   isMainDriver: boolean;
   lastSeenAt: number;
@@ -40,7 +48,7 @@ export interface RoomEvent {
   requestId: string;
   buttonId: string | null;
   decision: Decision | null;
-  actorSessionId: string;
+  actorParticipantId: string | null;
   createdAt: number;
 }
 
@@ -58,14 +66,7 @@ export interface RoomState {
     acceptUrl: string | null;
     rejectUrl: string | null;
   };
+  currentParticipantId: string | null;
   isMainDriver: boolean;
   events: RoomEvent[];
-}
-
-export interface ActiveRoomSummary {
-  id: string;
-  code: string;
-  name: string;
-  activeParticipants: number;
-  lastActivityAt: number;
 }

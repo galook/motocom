@@ -9,7 +9,7 @@ const events: RoomEvent[] = [
     requestId: "r1",
     buttonId: "b1",
     decision: null,
-    actorSessionId: "other",
+    actorParticipantId: "other",
     createdAt: 1,
   },
   {
@@ -18,7 +18,7 @@ const events: RoomEvent[] = [
     requestId: "r1",
     buttonId: "b1",
     decision: "accepted",
-    actorSessionId: "other",
+    actorParticipantId: "other",
     createdAt: 2,
   },
   {
@@ -27,7 +27,7 @@ const events: RoomEvent[] = [
     requestId: "r2",
     buttonId: "b2",
     decision: "rejected",
-    actorSessionId: "self",
+    actorParticipantId: "self",
     createdAt: 3,
   },
 ];
@@ -37,36 +37,33 @@ describe("planPlayback", () => {
     const result = planPlayback({
       events,
       lastSeq: 3,
-      sessionId: "self",
-      audioUnlocked: true,
+      currentParticipantId: "self",
       selfIsActive: true,
       buttons: [],
       outcomeSounds: { acceptUrl: null, rejectUrl: null },
     });
 
-    expect(result).toEqual({ nextSeq: 3, urls: [] });
+    expect(result).toEqual({ nextSeq: 3, items: [] });
   });
 
   it("advances sequence without audio when self is inactive", () => {
     const result = planPlayback({
       events,
       lastSeq: 0,
-      sessionId: "self",
-      audioUnlocked: true,
+      currentParticipantId: "self",
       selfIsActive: false,
       buttons: [],
       outcomeSounds: { acceptUrl: "accept.mp3", rejectUrl: "reject.mp3" },
     });
 
-    expect(result).toEqual({ nextSeq: 3, urls: [] });
+    expect(result).toEqual({ nextSeq: 3, items: [] });
   });
 
-  it("collects button + outcome urls for remote events only", () => {
+  it("collects structured button and outcome playback for remote events only", () => {
     const result = planPlayback({
       events,
       lastSeq: 0,
-      sessionId: "self",
-      audioUnlocked: true,
+      currentParticipantId: "self",
       selfIsActive: true,
       buttons: [
         {
@@ -80,16 +77,20 @@ describe("planPlayback", () => {
       outcomeSounds: { acceptUrl: "accept.mp3", rejectUrl: "reject.mp3" },
     });
 
-    expect(result.nextSeq).toBe(3);
-    expect(result.urls).toEqual(["horn.mp3", "accept.mp3"]);
+    expect(result).toEqual({
+      nextSeq: 3,
+      items: [
+        { url: "horn.mp3", createdAt: 1, eventSeq: 1 },
+        { url: "accept.mp3", createdAt: 2, eventSeq: 2 },
+      ],
+    });
   });
 
-  it("still returns urls when audio is locked so playback can resume after unlock", () => {
+  it("keeps event timestamps so the audio layer can expire stale items", () => {
     const result = planPlayback({
       events,
       lastSeq: 0,
-      sessionId: "self",
-      audioUnlocked: false,
+      currentParticipantId: null,
       selfIsActive: true,
       buttons: [
         {
@@ -103,6 +104,6 @@ describe("planPlayback", () => {
       outcomeSounds: { acceptUrl: "accept.mp3", rejectUrl: "reject.mp3" },
     });
 
-    expect(result).toEqual({ nextSeq: 3, urls: ["horn.mp3", "accept.mp3"] });
+    expect(result.items.map((item) => item.createdAt)).toEqual([1, 2, 3]);
   });
 });

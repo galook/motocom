@@ -1,5 +1,6 @@
 import { resolveSessionId } from "~/utils/session";
-const STORAGE_KEY = "motocom.session-id";
+// Rotated after the v2 authorization fix so previously exposed identifiers cannot own templates.
+const STORAGE_KEY = "motocom.owner-token.v2";
 
 export function useSessionId() {
   const sessionId = useState<string>("session-id", () => "");

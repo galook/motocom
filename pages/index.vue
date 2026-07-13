@@ -1,23 +1,32 @@
 <script setup lang="ts">
 import { api } from "~/convex/_generated/api";
-import type { ActiveRoomSummary } from "~/types/soundboard";
 import { generateRoomCode } from "~/utils/roomCode";
 import { buildConnectivityHint, runMutation, toErrorMessage } from "~/utils/mutation";
+import {
+  createClientSecretToken,
+  createOperationId,
+  getRoomParticipantToken,
+  setRoomParticipantToken,
+} from "~/utils/participantToken";
 
-const sessionId = useSessionId();
 const runtimeConfig = useRuntimeConfig();
 const convexUrl = String(runtimeConfig.public.convexUrl || "");
 
 const createRoomName = ref("");
 const createDisplayName = ref("");
 const createPin = ref("");
-
 const joinRoomCode = ref("");
 const joinDisplayName = ref("");
-
 const isCreating = ref(false);
 const isJoining = ref(false);
 const errorMessage = ref("");
+const pendingCreate = ref<{
+  fingerprint: string;
+  roomCode: string;
+  participantToken: string;
+  operationId: string;
+} | null>(null);
+const pendingJoin = ref<{ roomCode: string; participantToken: string } | null>(null);
 const connectionWarning = computed(() => buildConnectivityHint(convexUrl));
 
 function trimToString(value: unknown): string {
@@ -28,33 +37,6 @@ function hasText(value: unknown): boolean {
   return trimToString(value).length > 0;
 }
 
-function toActiveRooms(value: unknown): ActiveRoomSummary[] {
-  return Array.isArray(value) ? value as ActiveRoomSummary[] : [];
-}
-
-const { data: activeRoomsData, isPending: activeRoomsPending } = useConvexQuery(
-  api.rooms.listActiveRooms,
-  {},
-);
-
-const activeRooms = computed<ActiveRoomSummary[]>(() => toActiveRooms(activeRoomsData.value));
-const hasActiveRooms = computed(() => activeRooms.value.length > 0);
-
-watch(
-  activeRooms,
-  (roomsValue) => {
-    const rooms = toActiveRooms(roomsValue);
-    if (!joinRoomCode.value && rooms.length > 0) {
-      joinRoomCode.value = rooms[0].code;
-    }
-
-    if (joinRoomCode.value && !rooms.find((room) => room.code === joinRoomCode.value)) {
-      joinRoomCode.value = rooms[0]?.code ?? "";
-    }
-  },
-  { immediate: true },
-);
-
 const { mutate: createRoomMutation } = useConvexMutation(api.rooms.createRoom);
 const { mutate: joinRoomMutation } = useConvexMutation(api.rooms.joinRoom);
 
@@ -63,7 +45,7 @@ const canCreateRoom = computed(() => (
   !isCreating.value &&
   hasText(createRoomName.value) &&
   hasText(createDisplayName.value) &&
-  hasText(createPin.value)
+  trimToString(createPin.value).length >= 6
 ));
 
 const canJoinRoom = computed(() => (
@@ -73,49 +55,69 @@ const canJoinRoom = computed(() => (
   hasText(joinDisplayName.value)
 ));
 
-const requireSessionId = () => {
-  if (!sessionId.value) {
-    throw new Error("Session is not ready yet. Refresh and try again.");
-  }
-};
-
 const createRoom = async () => {
   errorMessage.value = "";
   isCreating.value = true;
 
   try {
-    requireSessionId();
     const roomName = trimToString(createRoomName.value);
     const displayName = trimToString(createDisplayName.value);
     const mainDriverPin = trimToString(createPin.value);
-
+    const fingerprint = [roomName, displayName, mainDriverPin].join("|");
+    if (pendingCreate.value?.fingerprint !== fingerprint) {
+      pendingCreate.value = {
+        fingerprint,
+        roomCode: generateRoomCode(),
+        participantToken: createClientSecretToken(),
+        operationId: createOperationId(),
+      };
+    }
     const maxAttempts = 8;
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const generatedCode = generateRoomCode();
 
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const createAttempt = pendingCreate.value;
+      if (!createAttempt) {
+        throw new Error("Unable to prepare room creation");
+      }
       try {
-        await runMutation(createRoomMutation, {
-          roomCode: generatedCode,
+        const result = await runMutation<
+          {
+            roomCode: string;
+            roomName: string;
+            displayName: string;
+            mainDriverPin: string;
+            participantToken: string;
+            operationId: string;
+          },
+          { participantToken: string }
+        >(createRoomMutation, {
+          roomCode: createAttempt.roomCode,
           roomName,
           displayName,
           mainDriverPin,
-          sessionId: sessionId.value,
+          participantToken: createAttempt.participantToken,
+          operationId: createAttempt.operationId,
         }, {
           operationName: "Create room",
           convexUrl,
         });
 
+        setRoomParticipantToken(createAttempt.roomCode, result.participantToken);
         if (process.client) {
           window.localStorage.setItem("motocom.display-name", displayName);
         }
-
-        await navigateTo(`/room/${generatedCode}`);
+        const createdRoomCode = createAttempt.roomCode;
+        pendingCreate.value = null;
+        await navigateTo(`/room/${createdRoomCode}`);
         return;
       } catch (error) {
         const message = toErrorMessage(error);
         const isCollision = message.toLowerCase().includes("already in use");
         if (!isCollision || attempt === maxAttempts - 1) {
           throw error;
+        }
+        if (pendingCreate.value) {
+          pendingCreate.value.roomCode = generateRoomCode();
         }
       }
     }
@@ -131,22 +133,33 @@ const joinRoom = async () => {
   isJoining.value = true;
 
   try {
-    requireSessionId();
-    const selectedCode = trimToString(joinRoomCode.value).toUpperCase();
+    const selectedCode = trimToString(joinRoomCode.value).toUpperCase().replace(/\s+/g, "");
     const displayName = trimToString(joinDisplayName.value);
-    await runMutation(joinRoomMutation, {
+    const existingToken = getRoomParticipantToken(selectedCode);
+    if (pendingJoin.value?.roomCode !== selectedCode) {
+      pendingJoin.value = {
+        roomCode: selectedCode,
+        participantToken: existingToken || createClientSecretToken(),
+      };
+    }
+    const candidateToken = pendingJoin.value.participantToken;
+    const result = await runMutation<
+      { roomCode: string; displayName: string; participantToken: string },
+      { participantToken: string }
+    >(joinRoomMutation, {
       roomCode: selectedCode,
       displayName,
-      sessionId: sessionId.value,
+      participantToken: candidateToken,
     }, {
       operationName: "Join room",
       convexUrl,
     });
 
+    setRoomParticipantToken(selectedCode, result.participantToken);
+    pendingJoin.value = null;
     if (process.client) {
       window.localStorage.setItem("motocom.display-name", displayName);
     }
-
     await navigateTo(`/room/${selectedCode}`);
   } catch (error) {
     errorMessage.value = toErrorMessage(error);
@@ -169,65 +182,62 @@ onMounted(() => {
     <section class="card">
       <h1>Motocom Sync Board</h1>
       <p class="muted">
-        Create a room with an auto-generated code or join one of the currently active rooms.
+        Create a private ride room or join one using its invitation code.
       </p>
       <p v-if="connectionWarning" class="error">{{ connectionWarning }}</p>
     </section>
 
     <section class="card">
       <h2>Create Room</h2>
-      <p class="muted">Room code is generated automatically when you create.</p>
+      <p class="muted">A private room code is generated after creation.</p>
       <div class="row">
         <div class="field-col">
           <label>Room name</label>
-          <input v-model="createRoomName" placeholder="Sunday Group" />
+          <input v-model="createRoomName" maxlength="80" placeholder="Sunday Group" />
         </div>
       </div>
       <div class="row">
         <div class="field-col">
           <label>Your display name</label>
-          <input v-model="createDisplayName" placeholder="Alex" />
+          <input v-model="createDisplayName" maxlength="48" placeholder="Alex" />
         </div>
         <div class="field-col">
           <label>Main driver PIN</label>
-          <input v-model="createPin" type="password" placeholder="Create PIN" />
+          <input
+            v-model="createPin"
+            type="password"
+            minlength="6"
+            autocomplete="new-password"
+            placeholder="At least 6 characters"
+          />
         </div>
       </div>
-      <button
-        :disabled="!canCreateRoom"
-        @click="createRoom"
-      >
+      <button :disabled="!canCreateRoom" @click="createRoom">
         {{ isCreating ? 'Creating...' : 'Create Room' }}
       </button>
     </section>
 
     <section class="card">
-      <h2>Join Active Room</h2>
-      <p class="muted" v-if="activeRoomsPending">Loading active rooms...</p>
-      <p class="muted" v-else-if="!hasActiveRooms">
-        No active rooms right now.
-      </p>
-
+      <h2>Join Room</h2>
+      <p class="muted">Enter the room code shared by your ride organizer.</p>
       <div class="row">
         <div class="field-col">
-          <label>Active room</label>
-          <select v-model="joinRoomCode" :disabled="!hasActiveRooms">
-            <option v-for="room in activeRooms" :key="room.id" :value="room.code">
-              {{ room.name }} ({{ room.code }}) · {{ room.activeParticipants }} active
-            </option>
-          </select>
+          <label>Room code</label>
+          <input
+            v-model="joinRoomCode"
+            maxlength="12"
+            autocapitalize="characters"
+            autocomplete="off"
+            placeholder="ABC123"
+          />
         </div>
         <div class="field-col">
           <label>Your display name</label>
-          <input v-model="joinDisplayName" placeholder="Alex" />
+          <input v-model="joinDisplayName" maxlength="48" placeholder="Alex" />
         </div>
       </div>
 
-      <button
-        class="secondary"
-        :disabled="!canJoinRoom"
-        @click="joinRoom"
-      >
+      <button class="secondary" :disabled="!canJoinRoom" @click="joinRoom">
         {{ isJoining ? 'Joining...' : 'Join Room' }}
       </button>
     </section>

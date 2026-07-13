@@ -10,7 +10,10 @@
     "dev:motocom": "CONVEX_URL=https://motocom.aoo.cz/convex NUXT_PORT=31900 NUXT_HOST=127.0.0.1 NUXT_DEV_PORT=31900 DEV_PUBLIC_HOST=motocom.aoo.cz DEV_HMR_CLIENT_PORT=443 nuxt dev --dotenv .env.local --host 127.0.0.1 --port 31900",
     "build": "nuxt build",
     "prod": "npm run convex:deploy && npm run prod:app",
-    "prod:app": "nuxt build --dotenv .env.local && NITRO_HOST=127.0.0.1 NITRO_PORT=31899 PORT=31899 node .output/server/index.mjs",
+    "build:app": "CONVEX_URL=https://moto.aoo.cz/convex CONVEX_PUBLIC_URL=/convex DEV_PUBLIC_HOST=moto.aoo.cz nuxt build",
+    "build:app:cloud": "CONVEX_URL=${CONVEX_URL:?missing_CONVEX_URL} CONVEX_PUBLIC_URL=${CONVEX_PUBLIC_URL:-} DEV_PUBLIC_HOST=${DEV_PUBLIC_HOST:-moto.aoo.cz} nuxt build",
+    "prod:app": "npm run build:app && NITRO_HOST=127.0.0.1 NITRO_PORT=31899 PORT=31899 node .output/server/index.mjs",
+    "prod:app:cloud": "npm run build:app:cloud && NITRO_HOST=127.0.0.1 NITRO_PORT=31899 PORT=31899 node .output/server/index.mjs",
     "prod:moto": "npm run prod:app",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
@@ -18,7 +21,10 @@
     "convex:deploy": "convex deploy",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "nuxt typecheck",
+    "deploy:now": "bash scripts/auto-deploy.sh",
+    "deploy:watch": "bash scripts/deploy-watcher.sh"
   },
   "dependencies": {
     "convex": "^1.25.2",
@@ -31,10 +37,12 @@
   "devDependencies": {
     "@vite-pwa/nuxt": "^1.1.1",
     "@vitejs/plugin-vue": "^6.0.4",
-    "@vitest/coverage-v8": "^2.1.9",
+    "@vitest/coverage-v8": "^4.1.10",
     "@vue/test-utils": "^2.4.6",
+    "convex-test": "^0.0.54",
     "jsdom": "^24.1.1",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.4"
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.3.7"
   }
 }

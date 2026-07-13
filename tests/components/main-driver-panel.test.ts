@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from "@vue/test-utils";
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onUnmounted, reactive, ref, watch } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const runMutationMock = vi.fn();
@@ -13,12 +13,42 @@ vi.mock("~/utils/mutation", () => ({
 }));
 
 function createMutationQueue() {
-  return [vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn()];
+  return [
+    vi.fn(),
+    vi.fn(),
+    vi.fn(),
+    vi.fn(),
+    vi.fn(),
+    vi.fn(),
+    vi.fn(),
+    vi.fn(),
+    vi.fn(),
+  ];
 }
 
-async function mountPanel(overrides?: Record<string, unknown>) {
+function findButtonByLabel(wrapper: ReturnType<typeof mount>, label: string) {
+  const button = wrapper.findAll("button").find((candidate) => candidate.text().trim() === label);
+  if (!button) {
+    throw new Error(`Button "${label}" not found`);
+  }
+  return button;
+}
+
+async function mountPanel({
+  overrides,
+  templates = [],
+  templatesPending = false,
+}: {
+  overrides?: Record<string, unknown>;
+  templates?: Array<Record<string, unknown>>;
+  templatesPending?: boolean;
+} = {}) {
   const mutationQueue = createMutationQueue();
   (globalThis as any).useConvexMutation = vi.fn(() => ({ mutate: mutationQueue.shift() }));
+  (globalThis as any).useConvexQuery = vi.fn(() => ({
+    data: ref(templates),
+    isPending: ref(templatesPending),
+  }));
   (globalThis as any).useRuntimeConfig = vi.fn(() => ({
     public: {
       convexUrl: "http://localhost:3210",
@@ -28,12 +58,14 @@ async function mountPanel(overrides?: Record<string, unknown>) {
   (globalThis as any).computed = computed;
   (globalThis as any).reactive = reactive;
   (globalThis as any).watch = watch;
+  (globalThis as any).onUnmounted = onUnmounted;
 
   const component = (await import("../../components/MainDriverPanel.vue")).default;
   const wrapper = mount(component, {
     props: {
       roomId: "room1",
-      sessionId: "session1",
+      participantToken: "participant-token",
+      ownerToken: "owner-token",
       buttons: [],
       outcomeSounds: {
         acceptUrl: null,
@@ -49,6 +81,7 @@ async function mountPanel(overrides?: Record<string, unknown>) {
 describe("MainDriverPanel", () => {
   beforeEach(() => {
     runMutationMock.mockReset();
+    vi.stubGlobal("confirm", vi.fn(() => true));
   });
 
   afterEach(() => {
@@ -64,7 +97,7 @@ describe("MainDriverPanel", () => {
   it("validates create button inputs", async () => {
     const wrapper = await mountPanel();
 
-    await wrapper.get("button").trigger("click");
+    await findButtonByLabel(wrapper, "Create Button").trigger("click");
 
     expect(wrapper.text()).toContain("New button needs both label and a source file (audio or video).");
     expect(runMutationMock).not.toHaveBeenCalled();
@@ -84,7 +117,7 @@ describe("MainDriverPanel", () => {
     });
     await fileInput.trigger("change");
 
-    await wrapper.get("button").trigger("click");
+    await findButtonByLabel(wrapper, "Create Button").trigger("click");
     await flushPromises();
 
     expect(wrapper.text()).toContain("Unsupported file format");
@@ -115,11 +148,54 @@ describe("MainDriverPanel", () => {
     });
     await fileInput.trigger("change");
 
-    await wrapper.get("button").trigger("click");
+    await findButtonByLabel(wrapper, "Create Button").trigger("click");
     await flushPromises();
 
     expect(fetchMock).toHaveBeenCalledWith("https://upload.example", expect.any(Object));
     expect(runMutationMock).toHaveBeenCalledTimes(2);
     expect(wrapper.text()).toContain("Button created.");
+  });
+
+  it("saves a template from current setup", async () => {
+    runMutationMock.mockResolvedValueOnce({
+      templateId: "template1",
+      replaced: false,
+      buttonCount: 3,
+    });
+
+    const wrapper = await mountPanel();
+
+    const templateInput = wrapper.find('input[placeholder="Example: Weekend Ride"]');
+    await templateInput.setValue("My Ride");
+
+    await findButtonByLabel(wrapper, "Save Current Setup as Template").trigger("click");
+    await flushPromises();
+
+    expect(runMutationMock).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain('Template "My Ride" saved.');
+  });
+
+  it("applies the selected template", async () => {
+    runMutationMock.mockResolvedValueOnce({
+      appliedButtonCount: 4,
+    });
+
+    const wrapper = await mountPanel({
+      templates: [
+        {
+          id: "template1",
+          name: "Weekend Ride",
+          buttonCount: 4,
+          hasOutcomeSounds: true,
+          updatedAt: Date.now(),
+        },
+      ],
+    });
+
+    await findButtonByLabel(wrapper, "Apply Template to This Room").trigger("click");
+    await flushPromises();
+
+    expect(runMutationMock).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain("Template applied (4 buttons).");
   });
 });

@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { MAX_EVENT_HISTORY } from "../convex/constants";
 import {
   appendEvent,
+  getLegacyParticipant,
   getOrCreateRoomState,
-  getParticipant,
+  getParticipantByToken,
   getRoomByCode,
   promoteNextQueuedRequest,
   requireMainDriver,
@@ -28,13 +29,11 @@ describe("convex helper queries", () => {
       }),
     }));
 
-    const ctx = { db: { query } };
-    await getRoomByCode(ctx, "  ride 01 ");
-
+    await getRoomByCode({ db: { query } } as any, "  ride 01 ");
     expect(eqCalls).toEqual([{ field: "code", value: "RIDE01" }]);
   });
 
-  it("queries participant by room and session", async () => {
+  it("hashes participant tokens before querying authorization records", async () => {
     const eqCalls: Array<{ field: string; value: string }> = [];
     const unique = vi.fn().mockResolvedValue({ _id: "p1" });
     const query = vi.fn(() => ({
@@ -50,10 +49,36 @@ describe("convex helper queries", () => {
       }),
     }));
 
-    const ctx = { db: { query } };
-    const participant = await getParticipant(ctx, "room1", "session1");
+    const participant = await getParticipantByToken(
+      { db: { query } } as any,
+      "room1" as any,
+      "participant-secret",
+    );
 
     expect(participant).toEqual({ _id: "p1" });
+    expect(eqCalls[0]).toEqual({ field: "roomId", value: "room1" });
+    expect(eqCalls[1].field).toBe("authTokenHash");
+    expect(eqCalls[1].value).not.toBe("participant-secret");
+    expect(eqCalls[1].value).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("keeps the legacy participant lookup isolated for migrations", async () => {
+    const eqCalls: Array<{ field: string; value: string }> = [];
+    const unique = vi.fn().mockResolvedValue({ _id: "p1" });
+    const query = vi.fn(() => ({
+      withIndex: vi.fn((_name, callback) => {
+        const q = {
+          eq: (field: string, value: string) => {
+            eqCalls.push({ field, value });
+            return q;
+          },
+        };
+        callback(q);
+        return { unique };
+      }),
+    }));
+
+    await getLegacyParticipant({ db: { query } } as any, "room1" as any, "session1");
     expect(eqCalls).toEqual([
       { field: "roomId", value: "room1" },
       { field: "sessionId", value: "session1" },
@@ -72,35 +97,37 @@ describe("convex role guards", () => {
     },
   });
 
-  it("requireParticipant returns participant", async () => {
+  it("requireParticipant returns the token-authorized participant", async () => {
     const result = await requireParticipant(
-      buildCtx({ _id: "p1", isMainDriver: false }),
-      "room1",
-      "session1",
+      buildCtx({ _id: "p1", isMainDriver: false }) as any,
+      "room1" as any,
+      "participant-token",
     );
-
     expect(result).toEqual({ _id: "p1", isMainDriver: false });
   });
 
-  it("requireParticipant throws when missing", async () => {
-    await expect(requireParticipant(buildCtx(null), "room1", "session1")).rejects.toThrow(
-      "Participant session not found in room",
-    );
+  it("requireParticipant rejects missing authorization", async () => {
+    await expect(
+      requireParticipant(buildCtx(null) as any, "room1" as any, "participant-token"),
+    ).rejects.toThrow("Participant authorization is invalid or expired");
   });
 
-  it("requireMainDriver throws when participant is not elevated", async () => {
+  it("requireMainDriver rejects a rider", async () => {
     await expect(
-      requireMainDriver(buildCtx({ _id: "p1", isMainDriver: false }), "room1", "session1"),
+      requireMainDriver(
+        buildCtx({ _id: "p1", isMainDriver: false }) as any,
+        "room1" as any,
+        "participant-token",
+      ),
     ).rejects.toThrow("Main driver role required");
   });
 
-  it("requireMainDriver returns main driver participant", async () => {
+  it("requireMainDriver returns an elevated participant", async () => {
     const participant = await requireMainDriver(
-      buildCtx({ _id: "p1", isMainDriver: true }),
-      "room1",
-      "session1",
+      buildCtx({ _id: "p1", isMainDriver: true }) as any,
+      "room1" as any,
+      "participant-token",
     );
-
     expect(participant).toEqual({ _id: "p1", isMainDriver: true });
   });
 });
@@ -108,23 +135,19 @@ describe("convex role guards", () => {
 describe("room state helpers", () => {
   it("returns existing room state when available", async () => {
     const existing = { _id: "rs1", roomId: "room1", nextSeq: 1, activeRequestId: null };
-
     const insert = vi.fn();
     const get = vi.fn();
     const ctx = {
       db: {
         query: vi.fn(() => ({
-          withIndex: vi.fn(() => ({
-            unique: vi.fn().mockResolvedValue(existing),
-          })),
+          withIndex: vi.fn(() => ({ unique: vi.fn().mockResolvedValue(existing) })),
         })),
         insert,
         get,
       },
     };
 
-    const result = await getOrCreateRoomState(ctx, "room1");
-
+    const result = await getOrCreateRoomState(ctx as any, "room1" as any);
     expect(result).toEqual(existing);
     expect(insert).not.toHaveBeenCalled();
     expect(get).not.toHaveBeenCalled();
@@ -132,23 +155,19 @@ describe("room state helpers", () => {
 
   it("creates and returns room state when missing", async () => {
     const inserted = { _id: "rs2", roomId: "room2", nextSeq: 1, activeRequestId: null };
-
     const insert = vi.fn().mockResolvedValue("rs2");
     const get = vi.fn().mockResolvedValue(inserted);
     const ctx = {
       db: {
         query: vi.fn(() => ({
-          withIndex: vi.fn(() => ({
-            unique: vi.fn().mockResolvedValue(null),
-          })),
+          withIndex: vi.fn(() => ({ unique: vi.fn().mockResolvedValue(null) })),
         })),
         insert,
         get,
       },
     };
 
-    const result = await getOrCreateRoomState(ctx, "room2");
-
+    const result = await getOrCreateRoomState(ctx as any, "room2" as any);
     expect(insert).toHaveBeenCalledWith("room_state", {
       roomId: "room2",
       activeRequestId: null,
@@ -160,28 +179,25 @@ describe("room state helpers", () => {
 });
 
 describe("event helpers", () => {
-  it("appends event and increments sequence", async () => {
+  it("appends a public participant actor and increments sequence", async () => {
     const roomState = { _id: "rs1", roomId: "room1", nextSeq: 7, activeRequestId: null };
     const insert = vi.fn();
     const patch = vi.fn();
-
     const ctx = {
       db: {
         query: vi.fn(() => ({
-          withIndex: vi.fn(() => ({
-            unique: vi.fn().mockResolvedValue(roomState),
-          })),
+          withIndex: vi.fn(() => ({ unique: vi.fn().mockResolvedValue(roomState) })),
         })),
         insert,
         patch,
       },
     };
 
-    const seq = await appendEvent(ctx, "room1", {
+    const seq = await appendEvent(ctx as any, "room1" as any, {
       type: "request_started",
-      requestId: "req1",
-      buttonId: "btn1",
-      actorSessionId: "session1",
+      requestId: "req1" as any,
+      buttonId: "btn1" as any,
+      actorParticipantId: "participant1" as any,
     });
 
     expect(seq).toBe(7);
@@ -193,7 +209,7 @@ describe("event helpers", () => {
         type: "request_started",
         requestId: "req1",
         buttonId: "btn1",
-        actorSessionId: "session1",
+        actorParticipantId: "participant1",
       }),
     );
     expect(patch).toHaveBeenCalledWith("rs1", { nextSeq: 8 });
@@ -204,22 +220,18 @@ describe("event helpers", () => {
       _id: `event-${index}`,
     }));
     const deleteFn = vi.fn();
-
     const ctx = {
       db: {
         query: vi.fn(() => ({
           withIndex: vi.fn(() => ({
-            order: vi.fn(() => ({
-              collect: vi.fn().mockResolvedValue(events),
-            })),
+            order: vi.fn(() => ({ collect: vi.fn().mockResolvedValue(events) })),
           })),
         })),
         delete: deleteFn,
       },
     };
 
-    await trimRoomEvents(ctx, "room1");
-
+    await trimRoomEvents(ctx as any, "room1" as any);
     expect(deleteFn).toHaveBeenCalledTimes(2);
     expect(deleteFn).toHaveBeenCalledWith("event-50");
     expect(deleteFn).toHaveBeenCalledWith("event-51");
@@ -230,15 +242,12 @@ describe("queue promotion", () => {
   it("returns null when queue is empty", async () => {
     const patch = vi.fn();
     const insert = vi.fn();
-
     const ctx = {
       db: {
         query: vi.fn((table: string) => {
           if (table === "requests") {
             return {
-              withIndex: vi.fn(() => ({
-                take: vi.fn().mockResolvedValue([]),
-              })),
+              withIndex: vi.fn(() => ({ take: vi.fn().mockResolvedValue([]) })),
             };
           }
           throw new Error(`unexpected table: ${table}`);
@@ -248,50 +257,43 @@ describe("queue promotion", () => {
       },
     };
 
-    const result = await promoteNextQueuedRequest(ctx, "room1");
-
+    const result = await promoteNextQueuedRequest(ctx as any, "room1" as any);
     expect(result).toBeNull();
     expect(patch).not.toHaveBeenCalled();
     expect(insert).not.toHaveBeenCalled();
   });
 
-  it("promotes queued request to active and emits event", async () => {
+  it("promotes a valid queued request and emits a public actor id", async () => {
     const roomState = { _id: "rs1", roomId: "room1", nextSeq: 4, activeRequestId: null };
     const nextQueued = {
       _id: "req1",
       buttonId: "btn1",
-      requestedBySessionId: "session-rider",
+      requestedByParticipantId: "participant-rider",
     };
-
     const patch = vi.fn();
     const insert = vi.fn().mockResolvedValue("event1");
-
     const ctx = {
       db: {
         query: vi.fn((table: string) => {
           if (table === "requests") {
             return {
-              withIndex: vi.fn(() => ({
-                take: vi.fn().mockResolvedValue([nextQueued]),
-              })),
+              withIndex: vi.fn(() => ({ take: vi.fn().mockResolvedValue([nextQueued]) })),
             };
           }
           if (table === "room_state") {
             return {
-              withIndex: vi.fn(() => ({
-                unique: vi.fn().mockResolvedValue(roomState),
-              })),
+              withIndex: vi.fn(() => ({ unique: vi.fn().mockResolvedValue(roomState) })),
             };
           }
           throw new Error(`unexpected table: ${table}`);
         }),
+        get: vi.fn().mockResolvedValue({ _id: "btn1", roomId: "room1", isEnabled: true }),
         patch,
         insert,
       },
     };
 
-    const result = await promoteNextQueuedRequest(ctx, "room1");
-
+    const result = await promoteNextQueuedRequest(ctx as any, "room1" as any);
     expect(result).toBe("req1");
     expect(patch).toHaveBeenCalledWith(
       "req1",
@@ -306,7 +308,7 @@ describe("queue promotion", () => {
         type: "request_started",
         requestId: "req1",
         buttonId: "btn1",
-        actorSessionId: "session-rider",
+        actorParticipantId: "participant-rider",
       }),
     );
     expect(patch).toHaveBeenCalledWith("rs1", { nextSeq: 5 });

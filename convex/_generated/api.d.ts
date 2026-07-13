@@ -10,7 +10,9 @@
 
 import type * as buttons from "../buttons.js";
 import type * as constants from "../constants.js";
+import type * as crons from "../crons.js";
 import type * as lib_helpers from "../lib/helpers.js";
+import type * as maintenance from "../maintenance.js";
 import type * as requests from "../requests.js";
 import type * as rooms from "../rooms.js";
 import type * as uploads from "../uploads.js";
@@ -24,7 +26,9 @@ import type {
 declare const fullApi: ApiFromModules<{
   buttons: typeof buttons;
   constants: typeof constants;
+  crons: typeof crons;
   "lib/helpers": typeof lib_helpers;
+  maintenance: typeof maintenance;
   requests: typeof requests;
   rooms: typeof rooms;
   uploads: typeof uploads;

@@ -6,12 +6,17 @@ const AUDIO_CONTEXT_RESUME_TIMEOUT_MS = 1_500;
 const AUDIO_UNLOCK_TIMEOUT_MS = 2_500;
 const AUDIO_FETCH_TIMEOUT_MS = 12_000;
 const PLAYBACK_END_TIMEOUT_MS = 8_000;
+const MAX_PLAYBACK_DURATION_MS = 8_000;
 const PLAYBACK_RETRY_DELAY_MS = 150;
 const MAX_PLAY_ATTEMPTS = 2;
 const MAX_PENDING_PLAYBACK = 20;
-const MAX_DECODED_BUFFER_CACHE = 40;
+const MAX_PENDING_PLAYBACK_AGE_MS = 5_000;
+const MAX_DECODED_BUFFER_CACHE_BYTES = 32 * 1024 * 1024;
 const AUDIO_DEBUG_ALERT_COOLDOWN_MS = 1_500;
-const AUDIO_DEBUG_ALERT_MAX_LENGTH = 1_800;
+const DEFAULT_PLAYBACK_VOLUME = 1.5;
+const MIN_PLAYBACK_VOLUME = 0;
+const MAX_PLAYBACK_VOLUME = 2;
+const PLAYBACK_VOLUME_STORAGE_KEY = "motocom.playback-volume";
 
 const sleep = (durationMs: number) =>
   new Promise((resolve) => setTimeout(resolve, durationMs));
@@ -63,7 +68,23 @@ function playbackTimeoutMs(durationSeconds: number): number {
   if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
     return PLAYBACK_END_TIMEOUT_MS;
   }
-  return Math.max(PLAYBACK_END_TIMEOUT_MS, Math.ceil(durationSeconds * 1_000) + 500);
+  return Math.min(
+    MAX_PLAYBACK_DURATION_MS,
+    Math.max(1_000, Math.ceil(durationSeconds * 1_000) + 500),
+  );
+}
+
+interface PendingPlaybackItem {
+  url: string;
+  createdAt: number;
+  eventSeq?: number;
+}
+
+function clampPlaybackVolume(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_PLAYBACK_VOLUME;
+  }
+  return Math.min(MAX_PLAYBACK_VOLUME, Math.max(MIN_PLAYBACK_VOLUME, value));
 }
 
 async function fetchAudioBytes(url: string): Promise<ArrayBuffer> {
@@ -87,10 +108,23 @@ async function fetchAudioBytes(url: string): Promise<ArrayBuffer> {
   }
 }
 
-async function waitForSourceToEnd(source: AudioBufferSourceNode, timeoutMs: number) {
+async function waitForSourceToEnd(
+  source: AudioBufferSourceNode,
+  timeoutMs: number,
+  stopOnTimeout = false,
+) {
   await new Promise<void>((resolve, reject) => {
     let settled = false;
     const timeoutHandle = setTimeout(() => {
+      if (stopOnTimeout) {
+        try {
+          source.stop();
+        } catch {
+          // The source may already have stopped.
+        }
+        finish();
+        return;
+      }
       finish(new Error("Timed out while waiting for audio playback to finish."));
     }, timeoutMs);
 
@@ -124,7 +158,15 @@ export function useAudioUnlock(convexUrl = "") {
   const isUnlocked = useState<boolean>("audio-unlocked", () => false);
   const isUnlocking = ref(false);
   const chain = ref(Promise.resolve());
-  const pendingUrls = useState<string[]>("audio-pending-urls", () => []);
+  const pendingUrls = useState<PendingPlaybackItem[]>("audio-pending-urls", () => []);
+  const playbackVolume = useState<number>(
+    "audio-playback-volume",
+    () => DEFAULT_PLAYBACK_VOLUME,
+  );
+  const playbackVolumeLoaded = useState<boolean>(
+    "audio-playback-volume-loaded",
+    () => false,
+  );
   const audioContext = useState<AudioContext | null>("audio-context", () => null);
   const decodeCache = useState<Map<string, AudioBuffer>>(
     "audio-decode-cache",
@@ -139,6 +181,16 @@ export function useAudioUnlock(convexUrl = "") {
     () => ({ key: "", at: 0 }),
   );
   const { logStatus, logError } = useSystemDiagnosticsLog();
+
+  if (process.client && !playbackVolumeLoaded.value) {
+    const storedValue = window.localStorage.getItem(PLAYBACK_VOLUME_STORAGE_KEY);
+    if (storedValue != null) {
+      playbackVolume.value = clampPlaybackVolume(Number(storedValue));
+    } else {
+      playbackVolume.value = clampPlaybackVolume(playbackVolume.value);
+    }
+    playbackVolumeLoaded.value = true;
+  }
 
   const summarizeError = (error: unknown) => {
     if (!error) {
@@ -177,7 +229,7 @@ export function useAudioUnlock(convexUrl = "") {
       detailEntries.join(", "),
     );
 
-    if (!process.client || typeof window === "undefined" || typeof window.alert !== "function") {
+    if (!process.client) {
       return;
     }
 
@@ -205,17 +257,6 @@ export function useAudioUnlock(convexUrl = "") {
     ].join("\n");
 
     console.error(text, error);
-    const isJsdom =
-      typeof navigator !== "undefined" && /jsdom/i.test(navigator.userAgent || "");
-    if (isJsdom) {
-      return;
-    }
-
-    try {
-      window.alert(text.slice(0, AUDIO_DEBUG_ALERT_MAX_LENGTH));
-    } catch {
-      // Ignore alert failures in unsupported environments.
-    }
   };
 
   const ensureAudioContext = () => {
@@ -263,10 +304,11 @@ export function useAudioUnlock(convexUrl = "") {
       return false;
     }
 
-    const running = context.state === "running";
+    const currentState = (context as AudioContext).state;
+    const running = currentState === "running";
     if (!running) {
       showAudioDebugAlert("resume-context-not-running", {
-        state: context.state,
+        state: currentState,
       });
     }
     return running;
@@ -305,6 +347,9 @@ export function useAudioUnlock(convexUrl = "") {
     return true;
   };
 
+  const decodedBufferBytes = (buffer: AudioBuffer) =>
+    Math.max(0, buffer.length * buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT);
+
   const rememberDecodedBuffer = (url: string, buffer: AudioBuffer) => {
     const cache = decodeCache.value;
     if (cache.has(url)) {
@@ -312,7 +357,13 @@ export function useAudioUnlock(convexUrl = "") {
     }
     cache.set(url, buffer);
 
-    while (cache.size > MAX_DECODED_BUFFER_CACHE) {
+    const totalBytes = () =>
+      Array.from(cache.values()).reduce(
+        (sum, cachedBuffer) => sum + decodedBufferBytes(cachedBuffer),
+        0,
+      );
+
+    while (cache.size > 1 && totalBytes() > MAX_DECODED_BUFFER_CACHE_BYTES) {
       const oldestKey = cache.keys().next().value as string | undefined;
       if (!oldestKey) {
         return;
@@ -372,15 +423,27 @@ export function useAudioUnlock(convexUrl = "") {
 
     const decodedBuffer = await loadDecodedBuffer(url);
     const source = context.createBufferSource();
+    const gainNode = context.createGain();
+    gainNode.gain.value = clampPlaybackVolume(playbackVolume.value);
     source.buffer = decodedBuffer;
-    source.connect(context.destination);
+    source.connect(gainNode);
+    gainNode.connect(context.destination);
 
     try {
-      await waitForSourceToEnd(source, playbackTimeoutMs(decodedBuffer.duration));
+      await waitForSourceToEnd(
+        source,
+        playbackTimeoutMs(decodedBuffer.duration),
+        true,
+      );
     } finally {
       source.onended = null;
       try {
         source.disconnect();
+      } catch {
+        // Ignore disconnect errors.
+      }
+      try {
+        gainNode.disconnect();
       } catch {
         // Ignore disconnect errors.
       }
@@ -421,33 +484,41 @@ export function useAudioUnlock(convexUrl = "") {
     throw lastError ?? new Error("Audio playback failed.");
   };
 
-  const queuePendingUrl = (url: string) => {
-    if (!url) {
+  const isPlaybackItemFresh = (item: PendingPlaybackItem) =>
+    Date.now() - item.createdAt <= MAX_PENDING_PLAYBACK_AGE_MS;
+
+  const queuePendingItem = (item: PendingPlaybackItem) => {
+    if (!item.url || !isPlaybackItemFresh(item)) {
       return;
     }
     const wasEmpty = pendingUrls.value.length === 0;
-    const nextPending = [...pendingUrls.value, url];
-    pendingUrls.value = nextPending.slice(-MAX_PENDING_PLAYBACK);
+    const withoutDuplicate = item.eventSeq == null
+      ? pendingUrls.value
+      : pendingUrls.value.filter((candidate) => candidate.eventSeq !== item.eventSeq);
+    pendingUrls.value = [...withoutDuplicate, item].slice(-MAX_PENDING_PLAYBACK);
     if (wasEmpty) {
-      logStatus("audio", "Playback queued while audio is locked.", `pending=${pendingUrls.value.length}`);
+      logStatus("audio", "Playback queued briefly while audio is locked.", `pending=${pendingUrls.value.length}`);
     }
   };
 
-  const enqueuePlaybackTask = (url: string) => {
+  const enqueuePlaybackTask = (item: PendingPlaybackItem) => {
     chain.value = chain.value
       .catch(() => {
         // Keep playback pipeline alive even if a previous task failed.
       })
       .then(async () => {
+        if (!isPlaybackItemFresh(item)) {
+          return;
+        }
         try {
-          await playWithRetry(url);
+          await playWithRetry(item.url);
         } catch (error) {
           if (isPlaybackBlockedError(error)) {
-            queuePendingUrl(url);
+            queuePendingItem(item);
             isUnlocked.value = false;
             return;
           }
-          showAudioDebugAlert("playback-task-failed", { url }, error);
+          showAudioDebugAlert("playback-task-failed", { url: item.url }, error);
         }
       });
   };
@@ -457,12 +528,18 @@ export function useAudioUnlock(convexUrl = "") {
       return;
     }
 
-    const bufferedUrls = pendingUrls.value;
+    const bufferedItems = pendingUrls.value.filter(isPlaybackItemFresh);
+    const discardedCount = pendingUrls.value.length - bufferedItems.length;
     pendingUrls.value = [];
-    logStatus("audio", "Flushing queued playback.", `items=${bufferedUrls.length}`);
+    if (discardedCount > 0) {
+      logStatus("audio", "Discarded stale queued playback.", `items=${discardedCount}`);
+    }
+    if (bufferedItems.length > 0) {
+      logStatus("audio", "Flushing queued playback.", `items=${bufferedItems.length}`);
+    }
 
-    for (const bufferedUrl of bufferedUrls) {
-      enqueuePlaybackTask(bufferedUrl);
+    for (const bufferedItem of bufferedItems) {
+      enqueuePlaybackTask(bufferedItem);
     }
   };
 
@@ -520,18 +597,35 @@ export function useAudioUnlock(convexUrl = "") {
     }
   };
 
-  const queuePlayback = (url: string | null) => {
+  const queuePlayback = (
+    url: string | null,
+    createdAt = Date.now(),
+    eventSeq?: number,
+  ) => {
     if (!process.client || !url) {
       return;
     }
 
+    const item: PendingPlaybackItem = { url, createdAt, eventSeq };
+    if (!isPlaybackItemFresh(item)) {
+      return;
+    }
+
     if (!isUnlocked.value || !refreshAudioAvailability()) {
-      queuePendingUrl(url);
+      queuePendingItem(item);
       return;
     }
 
     flushPendingPlayback();
-    enqueuePlaybackTask(url);
+    enqueuePlaybackTask(item);
+  };
+
+  const setPlaybackVolume = (nextVolume: number) => {
+    const clamped = clampPlaybackVolume(nextVolume);
+    playbackVolume.value = clamped;
+    if (process.client) {
+      window.localStorage.setItem(PLAYBACK_VOLUME_STORAGE_KEY, String(clamped));
+    }
   };
 
   watch(
@@ -568,6 +662,8 @@ export function useAudioUnlock(convexUrl = "") {
   return {
     isUnlocked,
     isUnlocking,
+    playbackVolume,
+    setPlaybackVolume,
     unlockAudio,
     refreshAudioAvailability,
     queuePlayback,

@@ -2,9 +2,16 @@
 import { api } from "~/convex/_generated/api";
 import type { ButtonVisualState, Decision, RoomState } from "~/types/soundboard";
 import { buildConnectivityHint, runMutation, toErrorMessage } from "~/utils/mutation";
+import {
+  createClientSecretToken,
+  createOperationId,
+  getRoomParticipantToken,
+  setRoomParticipantToken,
+} from "~/utils/participantToken";
 
 const route = useRoute();
-const sessionId = useSessionId();
+const ownerToken = useSessionId();
+const participantToken = ref("");
 const runtimeConfig = useRuntimeConfig();
 const convexUrl = String(runtimeConfig.public.convexUrl || "");
 const roomCode = computed(() => String(route.params.code || "").trim().toUpperCase());
@@ -18,30 +25,54 @@ const isEnqueueing = ref(false);
 const isRemovingButton = ref(false);
 const isResolving = ref(false);
 const isJoiningRoom = ref(false);
+const pendingEnqueueOperationByButton = reactive<Record<string, string>>({});
 const isClaiming = ref(false);
 const connectionWarning = computed(() => buildConnectivityHint(convexUrl));
 const APP_LOCKED_MESSAGE = "Tap the speaker icon to unlock audio before using the app.";
 const RESOLUTION_FEEDBACK_MS = 3_500;
 const AUDIO_AVAILABILITY_POLL_MS = 900;
 
-const { isUnlocked, isUnlocking, unlockAudio, refreshAudioAvailability, queuePlayback } = useAudioUnlock(convexUrl);
+const {
+  isUnlocked,
+  isUnlocking,
+  playbackVolume,
+  setPlaybackVolume,
+  unlockAudio,
+  refreshAudioAvailability,
+  queuePlayback,
+} = useAudioUnlock(convexUrl);
 const { isWakeLockSupported, isWakeLockActive } = useScreenWakeLock();
 const { systemDiagnosticsLog, clearSystemDiagnosticsLog } = useSystemDiagnosticsLog();
 const feedbackNow = ref(Date.now());
-let feedbackTicker: ReturnType<typeof setInterval> | null = null;
-let audioAvailabilityTicker: ReturnType<typeof setInterval> | null = null;
+let feedbackTicker: number | null = null;
+let audioAvailabilityTicker: number | null = null;
 
 const roomQueryArgs = computed(() => ({
   roomCode: roomCode.value,
-  sessionId: sessionId.value || undefined,
+  participantToken: participantToken.value || undefined,
 }));
+const presenceQueryArgs = computed(() => ({ roomCode: roomCode.value }));
 
 const { data: roomData, isPending: roomPending } = useConvexQuery(
   api.rooms.getRoomState,
   roomQueryArgs,
 );
+const { data: presenceData } = useConvexQuery(
+  api.rooms.getRoomPresence,
+  presenceQueryArgs,
+);
 
-const roomState = computed(() => (roomData.value ?? null) as RoomState | null);
+type RoomStateWithoutPresence = Omit<RoomState, "participants">;
+const roomState = computed<RoomState | null>(() => {
+  const state = (roomData.value ?? null) as RoomStateWithoutPresence | null;
+  if (!state) {
+    return null;
+  }
+  return {
+    ...state,
+    participants: Array.isArray(presenceData.value) ? presenceData.value : [],
+  } as RoomState;
+});
 const roomId = computed(() => roomState.value?.room.id ?? null);
 const hasActiveRequest = computed(() => Boolean(roomState.value?.activeRequest));
 const showLiveRequestDock = computed(() => hasActiveRequest.value);
@@ -73,8 +104,8 @@ const buttonStates = computed<Record<string, ButtonVisualState>>(() => {
   return visualByButton;
 });
 
-usePresence(roomId, sessionId, isUnlocked);
-useEventPlayback(roomState, sessionId, isUnlocked, queuePlayback);
+usePresence(roomId, participantToken, isUnlocked);
+useEventPlayback(roomState, isUnlocked, queuePlayback);
 
 const { mutate: joinRoomMutation } = useConvexMutation(api.rooms.joinRoom);
 const { mutate: claimMainDriverMutation } = useConvexMutation(api.rooms.claimMainDriver);
@@ -83,13 +114,16 @@ const { mutate: deleteButtonMutation } = useConvexMutation(api.buttons.deleteBut
 const { mutate: resolveRequestMutation } = useConvexMutation(api.requests.resolveActiveRequest);
 
 const participantRecord = computed(() =>
-  roomState.value?.participants.find((participant) => participant.sessionId === sessionId.value) ?? null,
+  roomState.value?.participants.find(
+    (participant) => participant.id === roomState.value?.currentParticipantId,
+  ) ?? null,
 );
-const joinedInRoom = computed(() => participantRecord.value != null);
-const participantNameBySessionId = computed<Record<string, string>>(() => {
+const playbackVolumePercent = computed(() => Math.round(playbackVolume.value * 100));
+const joinedInRoom = computed(() => Boolean(roomState.value?.currentParticipantId));
+const participantNameById = computed<Record<string, string>>(() => {
   const mapping: Record<string, string> = {};
   for (const participant of roomState.value?.participants ?? []) {
-    mapping[participant.sessionId] = participant.displayName;
+    mapping[participant.id] = participant.displayName;
   }
   return mapping;
 });
@@ -103,17 +137,20 @@ const currentDisplayName = computed(() => {
   return localName || null;
 });
 
-const resolveParticipantName = (targetSessionId: string | null | undefined) => {
-  if (!targetSessionId) {
+const resolveParticipantName = (targetParticipantId: string | null | undefined) => {
+  if (!targetParticipantId) {
     return "Unknown rider";
   }
 
-  const knownName = participantNameBySessionId.value[targetSessionId];
+  const knownName = participantNameById.value[targetParticipantId];
   if (knownName) {
     return knownName;
   }
 
-  if (targetSessionId === sessionId.value && currentDisplayName.value) {
+  if (
+    targetParticipantId === roomState.value?.currentParticipantId &&
+    currentDisplayName.value
+  ) {
     return currentDisplayName.value;
   }
 
@@ -143,15 +180,23 @@ const joinRoom = async () => {
 
   isJoiningRoom.value = true;
   try {
-    await runMutation(joinRoomMutation, {
+    if (!participantToken.value) {
+      participantToken.value = createClientSecretToken();
+    }
+    const result = await runMutation<
+      { roomCode: string; displayName: string; participantToken: string },
+      { participantToken: string }
+    >(joinRoomMutation, {
       roomCode: roomCode.value,
       displayName: localDisplayName.value.trim(),
-      sessionId: sessionId.value,
+      participantToken: participantToken.value,
     }, {
       operationName: "Join room",
       convexUrl,
     });
 
+    participantToken.value = result.participantToken;
+    setRoomParticipantToken(roomCode.value, result.participantToken);
     if (process.client) {
       window.localStorage.setItem("motocom.display-name", localDisplayName.value.trim());
     }
@@ -181,12 +226,15 @@ const claimMainDriver = async () => {
 
   isClaiming.value = true;
   try {
-    const result = await runMutation<{ roomId: string; pin: string; sessionId: string }, { granted: boolean }>(
+    const result = await runMutation<
+      { roomId: string; pin: string; participantToken: string },
+      { granted: boolean }
+    >(
       claimMainDriverMutation,
       {
         roomId: roomId.value,
         pin: claimPin.value.trim(),
-        sessionId: sessionId.value,
+        participantToken: participantToken.value,
       },
       {
         operationName: "Claim main driver",
@@ -225,18 +273,22 @@ const enqueue = async (buttonId: string) => {
 
   isEnqueueing.value = true;
   try {
+    const operationId = pendingEnqueueOperationByButton[buttonId] ?? createOperationId();
+    pendingEnqueueOperationByButton[buttonId] = operationId;
     const result = await runMutation<
-      { roomId: string; buttonId: string; sessionId: string },
-      { requestId: string; status: "active" | "queued" }
+      { roomId: string; buttonId: string; participantToken: string; operationId: string },
+      { requestId: string; status: "active" | "queued"; replayed: boolean }
     >(enqueueRequestMutation, {
       roomId: roomId.value,
       buttonId,
-      sessionId: sessionId.value,
+      participantToken: participantToken.value,
+      operationId,
     }, {
       operationName: "Enqueue request",
       convexUrl,
     });
 
+    delete pendingEnqueueOperationByButton[buttonId];
     pageSuccess.value =
       result.status === "active"
         ? "Request is now active."
@@ -267,7 +319,7 @@ const resolveActiveRequest = async (decision: Decision) => {
     await runMutation(resolveRequestMutation, {
       roomId: roomId.value,
       decision,
-      sessionId: sessionId.value,
+      participantToken: participantToken.value,
     }, {
       operationName: "Resolve request",
       convexUrl,
@@ -309,7 +361,7 @@ const removeButtonFromBoard = async (buttonId: string) => {
     await runMutation(deleteButtonMutation, {
       roomId: roomId.value,
       buttonId,
-      sessionId: sessionId.value,
+      participantToken: participantToken.value,
     }, {
       operationName: "Delete button",
       convexUrl,
@@ -338,6 +390,15 @@ const eventLabel = (event: RoomState["events"][number]) => {
   return event.decision === "accepted" ? "Accepted active request" : "Rejected active request";
 };
 
+const onPlaybackVolumeInput = (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const nextPercent = Number(input.value);
+  if (!Number.isFinite(nextPercent)) {
+    return;
+  }
+  setPlaybackVolume(nextPercent / 100);
+};
+
 const onVisibilityChange = () => {
   if (!process.client || document.visibilityState !== "visible") {
     return;
@@ -355,6 +416,7 @@ onMounted(() => {
     feedbackNow.value = Date.now();
   }, 500);
 
+  participantToken.value = getRoomParticipantToken(roomCode.value);
   const storedName = window.localStorage.getItem("motocom.display-name");
   if (storedName) {
     localDisplayName.value = storedName;
@@ -560,7 +622,7 @@ onUnmounted(() => {
           <p v-if="!roomState.queue.length" class="muted">Queue is empty.</p>
           <ul class="history" v-else>
             <li v-for="queued in roomState.queue" :key="queued.id">
-              <strong>{{ queued.buttonLabel }}</strong> requested by {{ resolveParticipantName(queued.requestedBySessionId) }} at
+              <strong>{{ queued.buttonLabel }}</strong> requested by {{ resolveParticipantName(queued.requestedByParticipantId) }} at
               {{ formatTime(queued.createdAt) }}
             </li>
           </ul>
@@ -571,10 +633,28 @@ onUnmounted(() => {
           <p v-if="!roomState.events.length" class="muted">No events yet.</p>
           <ul class="history" v-else>
             <li v-for="event in roomState.events" :key="event.seq">
-              #{{ event.seq }} · {{ eventLabel(event) }} · {{ resolveParticipantName(event.actorSessionId) }} ·
+              #{{ event.seq }} · {{ eventLabel(event) }} · {{ resolveParticipantName(event.actorParticipantId) }} ·
               {{ formatTime(event.createdAt) }}
             </li>
           </ul>
+        </section>
+
+        <section class="settings-section">
+          <h3>Playback Volume (local)</h3>
+          <p class="muted">
+            Default is <strong>150%</strong>. This only affects this device.
+          </p>
+          <div class="volume-control">
+            <input
+              type="range"
+              min="0"
+              max="200"
+              step="5"
+              :value="playbackVolumePercent"
+              @input="onPlaybackVolumeInput"
+            />
+            <span class="badge ok">{{ playbackVolumePercent }}%</span>
+          </div>
         </section>
 
         <section class="settings-section">
@@ -630,7 +710,8 @@ onUnmounted(() => {
         <section class="settings-section" v-if="roomState.isMainDriver">
           <MainDriverPanel
             :room-id="roomState.room.id"
-            :session-id="sessionId"
+            :participant-token="participantToken"
+            :owner-token="ownerToken"
             :buttons="roomState.buttons"
             :outcome-sounds="roomState.outcomeSounds"
             :app-enabled="isUnlocked"
@@ -644,7 +725,7 @@ onUnmounted(() => {
           :is-main-driver="roomState.isMainDriver"
           :is-resolving="Boolean(connectionWarning) || !isUnlocked || isResolving"
           :queue-length="roomState.queue.length"
-          :requester-name="resolveParticipantName(roomState.activeRequest?.requestedBySessionId)"
+          :requester-name="resolveParticipantName(roomState.activeRequest?.requestedByParticipantId)"
           @resolve="resolveActiveRequest"
         />
       </section>
@@ -858,6 +939,18 @@ onUnmounted(() => {
 .settings-log__detail {
   font-size: 0.82rem;
   word-break: break-word;
+}
+
+.volume-control {
+  align-items: center;
+  display: flex;
+  gap: 0.7rem;
+}
+
+.volume-control input[type="range"] {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 0;
 }
 
 .audio-prompt-banner {

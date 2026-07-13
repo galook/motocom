@@ -27,15 +27,15 @@ describe("usePresence", () => {
     (globalThis as any).useConvexMutation = vi.fn(() => ({ mutate }));
 
     const roomId = ref<string | null>("room1");
-    const sessionId = ref("session1");
+    const participantToken = ref("participant-token");
     const audioUnlocked = ref(false);
 
-    usePresence(roomId, sessionId, audioUnlocked);
+    usePresence(roomId, participantToken, audioUnlocked);
     await nextTick();
 
     expect(mutate).toHaveBeenCalledWith({
       roomId: "room1",
-      sessionId: "session1",
+      participantToken: "participant-token",
       audioUnlocked: false,
     });
 
@@ -50,10 +50,10 @@ describe("usePresence", () => {
     (globalThis as any).useConvexMutation = vi.fn(() => ({ mutate }));
 
     const roomId = ref<string | null>("room1");
-    const sessionId = ref("session1");
+    const participantToken = ref("participant-token");
     const audioUnlocked = ref(false);
 
-    usePresence(roomId, sessionId, audioUnlocked);
+    usePresence(roomId, participantToken, audioUnlocked);
     await nextTick();
 
     audioUnlocked.value = true;
@@ -63,7 +63,7 @@ describe("usePresence", () => {
     expect(mutate).toHaveBeenCalledTimes(2);
     expect(mutate).toHaveBeenLastCalledWith({
       roomId: "room1",
-      sessionId: "session1",
+      participantToken: "participant-token",
       audioUnlocked: true,
     });
   });
