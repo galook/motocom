@@ -2,17 +2,7 @@
 set -Eeuo pipefail
 
 APP_ROOT="${APP_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-$HOME/.deploy/motocom/.env.production}"
-source "$APP_ROOT/scripts/use-node20.sh"
-cd "$APP_ROOT"
+export CONVEX_STATE_ROOT="${CONVEX_STATE_ROOT:-$HOME/.deploy/motocom/convex-state}"
+export CONVEX_PUBLIC_ORIGIN="${CONVEX_PUBLIC_ORIGIN:-https://moto.aoo.cz/convex}"
 
-if [[ ! -f "$DEPLOY_ENV_FILE" ]]; then
-  echo "Missing Convex environment file: $DEPLOY_ENV_FILE" >&2
-  exit 1
-fi
-
-exec npx convex dev \
-  --env-file "$DEPLOY_ENV_FILE" \
-  --typecheck enable \
-  --codegen disable \
-  --tail-logs disable
+exec python3 "$APP_ROOT/scripts/run-convex-backend.py"

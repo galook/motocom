@@ -6,6 +6,7 @@ DEPLOY_ROOT="${DEPLOY_ROOT:-/home/ubuntu/.deploy/motocom}"
 REMOTE="${DEPLOY_REMOTE:-origin}"
 BRANCH="${DEPLOY_BRANCH:-main}"
 ENV_FILE="${DEPLOY_ENV_FILE:-$DEPLOY_ROOT/.env.production}"
+SELF_HOSTED_ENV="${CONVEX_SELF_HOSTED_ENV:-$DEPLOY_ROOT/.env.selfhosted}"
 STATE_ROOT="${CONVEX_STATE_ROOT:-$DEPLOY_ROOT/convex-state}"
 RELEASES="$DEPLOY_ROOT/releases"
 CURRENT="$DEPLOY_ROOT/current"
@@ -53,12 +54,67 @@ stop_apps() {
   pm2 delete motocom-backend >/dev/null 2>&1 || true
 }
 
-start_release() {
+start_backend() {
   local release="$1"
   APP_ROOT="$release" \
   DEPLOY_ROOT="$DEPLOY_ROOT" \
   DEPLOY_ENV_FILE="$ENV_FILE" \
-    pm2 start "$release/ecosystem.config.cjs" --update-env
+  CONVEX_STATE_ROOT="$STATE_ROOT" \
+    pm2 start "$release/ecosystem.config.cjs" --only motocom-backend --update-env
+}
+
+start_app() {
+  local release="$1"
+  APP_ROOT="$release" \
+  DEPLOY_ROOT="$DEPLOY_ROOT" \
+  DEPLOY_ENV_FILE="$ENV_FILE" \
+    pm2 start "$release/ecosystem.config.cjs" --only motocom-app --update-env
+}
+
+start_release() {
+  local release="$1"
+  start_backend "$release"
+  start_app "$release"
+}
+
+wait_for_backend() {
+  local attempt
+  for attempt in $(seq 1 60); do
+    if backend_healthy; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+ensure_backend() {
+  local release="$1"
+  if backend_healthy; then
+    return 0
+  fi
+  pm2 delete motocom-backend >/dev/null 2>&1 || true
+  start_backend "$release"
+  wait_for_backend
+}
+
+write_self_hosted_env() {
+  STATE_CONFIG="$STATE_ROOT/local/default/config.json" \
+  SELF_HOSTED_ENV="$SELF_HOSTED_ENV" \
+    python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+config = json.loads(Path(os.environ["STATE_CONFIG"]).read_text(encoding="utf-8"))
+target = Path(os.environ["SELF_HOSTED_ENV"])
+target.write_text(
+    "CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210\n"
+    f"CONVEX_SELF_HOSTED_ADMIN_KEY={config['adminKey']}\n",
+    encoding="utf-8",
+)
+target.chmod(0o600)
+PY
 }
 
 deploy_convex_code() {
@@ -66,12 +122,11 @@ deploy_convex_code() {
   (
     source_node20 "$release"
     cd "$release"
-    npx convex dev \
-      --once \
-      --env-file "$ENV_FILE" \
+    npx convex deploy \
+      --env-file "$SELF_HOSTED_ENV" \
       --typecheck enable \
       --codegen disable \
-      --tail-logs disable
+      --message "Autodeploy $(basename "$release")"
   )
 }
 
@@ -126,10 +181,14 @@ rollback_release() {
   stop_apps
   if [[ -n "$previous" && -d "$previous" ]]; then
     log "Rolling back to $(basename "$previous")"
-    deploy_convex_code "$previous" || log "WARNING backend code rollback failed"
     ln -sfn "$previous" "$CURRENT"
-    start_release "$previous"
-    health_check || log "ERROR rollback health check failed"
+    if start_backend "$previous" && wait_for_backend; then
+      deploy_convex_code "$previous" || log "WARNING backend code rollback failed"
+      start_app "$previous"
+      health_check || log "ERROR rollback health check failed"
+    else
+      log "ERROR rollback backend failed to start"
+    fi
   else
     rm -f "$CURRENT"
   fi
@@ -144,6 +203,7 @@ if [[ ! -f "$STATE_ROOT/local/default/config.json" ]]; then
   log "ERROR missing persistent Convex state: $STATE_ROOT/local/default/config.json"
   exit 1
 fi
+write_self_hosted_env
 
 cd "$APP_ROOT"
 git fetch --quiet --prune "$REMOTE" "$BRANCH"
@@ -183,6 +243,12 @@ if [[ ! -d "$RELEASE" ]]; then
 fi
 
 backup_convex_state
+log "Ensuring Convex backend is running"
+if ! ensure_backend "$RELEASE"; then
+  log "ERROR Convex backend failed to start"
+  exit 1
+fi
+
 log "Deploying Convex functions for $TARGET_SHA"
 if ! deploy_convex_code "$RELEASE"; then
   log "ERROR Convex deployment failed for $TARGET_SHA"

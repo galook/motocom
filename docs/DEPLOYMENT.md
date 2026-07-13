@@ -17,9 +17,10 @@ Production secrets and deployment selection are stored outside Git at:
 
 ```text
 /home/ubuntu/.deploy/motocom/.env.production
+/home/ubuntu/.deploy/motocom/.env.selfhosted
 ```
 
-Permissions must remain `0600`.
+The second file is generated from the protected local-backend configuration and is used only for self-hosted Convex function pushes. Permissions must remain `0600`.
 
 ## Local Setup
 1. `npm install`
@@ -45,7 +46,7 @@ Permissions must remain `0600`.
 
 ## PM2 Processes
 - `motocom-app`: production Nuxt/Nitro server.
-- `motocom-backend`: persistent local Convex backend and function synchronizer.
+- `motocom-backend`: the configured Convex backend binary, bound only to loopback with client log redaction.
 - `motocom-deploy-watcher`: polls `origin/main` every 60 seconds and deploys new commits.
 
 PM2 state is saved with `pm2 save`, and the server-wide `pm2-ubuntu.service` restores it after reboot.
@@ -58,7 +59,7 @@ PM2 state is saved with `pm2 save`, and the server-wide `pm2-ubuntu.service` res
 3. Links the persistent Convex state and production environment into the release.
 4. Runs `npm ci`, tests, typecheck, audit, and the production build under Node 20.
 5. Creates a consistent SQLite backup of Convex state.
-6. Deploys Convex functions.
+6. Starts the backend binary when needed and deploys functions through Convex self-hosted mode.
 7. Atomically switches the `current` symlink.
 8. Restarts the two PM2 production processes.
 9. Verifies both the Nuxt and Convex health endpoints.

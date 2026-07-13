@@ -22,6 +22,8 @@ module.exports = {
         APP_ROOT: appRoot,
         DEPLOY_ROOT: deployRoot,
         DEPLOY_ENV_FILE: deployEnvFile,
+        CONVEX_STATE_ROOT: process.env.CONVEX_STATE_ROOT || path.join(deployRoot, "convex-state"),
+        CONVEX_PUBLIC_ORIGIN: process.env.CONVEX_PUBLIC_ORIGIN || "https://moto.aoo.cz/convex",
         NODE_ENV: "production",
       },
     },
