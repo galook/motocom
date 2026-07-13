@@ -27,6 +27,7 @@ const pageError = ref("");
 const pageSuccess = ref("");
 const isEnqueueing = ref(false);
 const isRemovingButton = ref(false);
+const pendingBoardButtonDelete = ref<{ id: string; label: string } | null>(null);
 const isResolving = ref(false);
 const isJoiningRoom = ref(false);
 const pendingEnqueueOperationByButton = reactive<Record<string, string>>({});
@@ -425,7 +426,7 @@ const resolveActiveRequest = async (decision: Decision) => {
   }
 };
 
-const removeButtonFromBoard = async (buttonId: string) => {
+const removeButtonFromBoard = (buttonId: string) => {
   clearMessages();
   if (connectionWarning.value) {
     pageError.value = connectionWarning.value;
@@ -441,25 +442,30 @@ const removeButtonFromBoard = async (buttonId: string) => {
   }
 
   const targetButton = roomState.value.buttons.find((button) => button.id === buttonId);
-  if (process.client) {
-    const label = targetButton?.label ?? "this button";
-    const confirmed = window.confirm(`Delete "${label}"?`);
-    if (!confirmed) {
-      return;
-    }
+  pendingBoardButtonDelete.value = {
+    id: buttonId,
+    label: targetButton?.label ?? "this signal",
+  };
+};
+
+const confirmRemoveButtonFromBoard = async () => {
+  const pending = pendingBoardButtonDelete.value;
+  if (!pending || !roomId.value) {
+    return;
   }
 
   isRemovingButton.value = true;
   try {
     await runMutation(deleteButtonMutation, {
       roomId: roomId.value,
-      buttonId,
+      buttonId: pending.id,
       participantToken: participantToken.value,
     }, {
       operationName: "Delete button",
       convexUrl,
     });
-    pageSuccess.value = "Button removed.";
+    pendingBoardButtonDelete.value = null;
+    showToast("Signal removed.");
   } catch (error) {
     pageError.value = toErrorMessage(error);
   } finally {
@@ -559,13 +565,14 @@ onUnmounted(() => {
 <template>
   <main
     class="page room-page"
+    data-testid="room-page"
     :class="{
       'room-page--with-dock': showLiveRequestDock,
       'room-page--with-audio-prompt': !isUnlocked,
     }"
   >
-    <header class="card room-header">
-      <NuxtLink class="icon-control" to="/" aria-label="Back to rooms">
+    <header class="card room-header" data-testid="room-header">
+      <NuxtLink class="icon-control" data-testid="room-back" to="/" aria-label="Back to rooms">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M14.5 5.5L8 12l6.5 6.5M9 12h11" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" />
         </svg>
@@ -576,7 +583,7 @@ onUnmounted(() => {
           <h1>{{ roomState?.room.name ?? `Room ${roomCode}` }}</h1>
           <span v-if="roomState?.isMainDriver" class="badge ok">Main driver</span>
         </div>
-        <button type="button" class="room-code" title="Copy room code" @click="copyRoomCode">
+        <button type="button" class="room-code" data-testid="room-code" title="Copy room code" @click="copyRoomCode">
           <span>{{ roomCode }}</span>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <rect x="8" y="8" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8" />
@@ -586,7 +593,7 @@ onUnmounted(() => {
       </div>
 
       <div class="room-header__actions">
-        <button type="button" class="icon-control" aria-label="Share room" @click="shareRoom">
+        <button type="button" class="icon-control" data-testid="share-room" aria-label="Share room" @click="shareRoom">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="18" cy="5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8" />
             <circle cx="6" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8" />
@@ -598,6 +605,7 @@ onUnmounted(() => {
           type="button"
           class="icon-control"
           :class="{ 'icon-control--active': showSettings }"
+          data-testid="toggle-controls"
           :aria-label="showSettings ? 'Hide room controls' : 'Show room controls'"
           @click="showSettings = !showSettings"
         >
@@ -611,6 +619,8 @@ onUnmounted(() => {
         <button
           type="button"
           class="status-pill"
+          data-testid="audio-status"
+          :data-state="isUnlocked ? 'ready' : isUnlocking ? 'enabling' : 'locked'"
           :class="isUnlocked ? 'status-pill--ok' : 'status-pill--warn'"
           :disabled="Boolean(connectionWarning) || isUnlocking"
           @click="unlockAudio"
@@ -618,11 +628,11 @@ onUnmounted(() => {
           <span class="status-pill__dot"></span>
           {{ isUnlocked ? 'Audio ready' : isUnlocking ? 'Enabling audio…' : 'Enable audio' }}
         </button>
-        <span class="status-pill status-pill--neutral">
+        <span class="status-pill status-pill--neutral" data-testid="online-status">
           <span class="status-pill__dot"></span>
           {{ activeParticipantCount }} online
         </span>
-        <span class="status-pill status-pill--neutral">
+        <span class="status-pill status-pill--neutral" data-testid="queue-status">
           {{ roomState?.queue.length ?? 0 }} queued
         </span>
         <span v-if="isWakeLockSupported" class="status-pill" :class="isWakeLockActive ? 'status-pill--ok' : 'status-pill--neutral'">
@@ -636,12 +646,12 @@ onUnmounted(() => {
       <p class="error">{{ connectionWarning }}</p>
     </section>
 
-    <section v-if="roomPending" class="card loading-card">
+    <section v-if="roomPending" class="card loading-card" data-testid="room-loading">
       <span class="loading-spinner" aria-hidden="true"></span>
       <div><strong>Connecting to the room</strong><p class="muted">Loading live state and audio controls…</p></div>
     </section>
 
-    <section v-else-if="!roomState" class="card empty-state">
+    <section v-else-if="!roomState" class="card empty-state" data-testid="room-not-found">
       <span class="empty-state__icon" aria-hidden="true">?</span>
       <h2>Room not found</h2>
       <p class="muted">Check the invitation code or ask the organizer for a new link.</p>
@@ -649,7 +659,7 @@ onUnmounted(() => {
     </section>
 
     <template v-else>
-      <section v-if="!joinedInRoom" class="card join-gate">
+      <section v-if="!joinedInRoom" class="card join-gate" data-testid="join-gate">
         <div class="join-gate__copy">
           <span class="join-gate__icon" aria-hidden="true">→</span>
           <div>
@@ -657,15 +667,15 @@ onUnmounted(() => {
             <p class="muted">Your display name helps the main driver identify requests.</p>
           </div>
         </div>
-        <form class="join-gate__form" @submit.prevent="joinRoom">
-          <input v-model="localDisplayName" maxlength="48" autocomplete="name" placeholder="Your name" aria-label="Your display name" />
-          <button :disabled="Boolean(connectionWarning) || !isUnlocked || isJoiningRoom || !localDisplayName.trim()" type="submit">
+        <form class="join-gate__form" data-testid="room-join-form" @submit.prevent="joinRoom">
+          <input v-model="localDisplayName" data-testid="room-join-name" maxlength="48" autocomplete="name" placeholder="Your name" aria-label="Your display name" />
+          <button data-testid="room-join-submit" :disabled="Boolean(connectionWarning) || !isUnlocked || isJoiningRoom || !localDisplayName.trim()" type="submit">
             {{ isJoiningRoom ? 'Joining…' : 'Join room' }}
           </button>
         </form>
       </section>
 
-      <section class="card soundboard-card">
+      <section class="card soundboard-card" data-testid="soundboard">
         <div class="soundboard-header">
           <div>
             <span class="section-kicker">Ride signals</span>
@@ -678,13 +688,13 @@ onUnmounted(() => {
             <label v-if="roomState.buttons.length > 6" class="sound-search">
               <span class="sr-only">Search signals</span>
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M15 15l5 5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" /></svg>
-              <input v-model="soundSearch" type="search" placeholder="Find signal" />
+              <input v-model="soundSearch" data-testid="sound-search" type="search" placeholder="Find signal" />
             </label>
             <div class="density-switch" role="group" aria-label="Soundboard layout">
-              <button type="button" :class="{ 'density-switch__active': gridDensity === 'comfortable' }" title="Comfortable layout" @click="setGridDensity('comfortable')">
+              <button type="button" data-testid="density-comfortable" :aria-pressed="gridDensity === 'comfortable'" :class="{ 'density-switch__active': gridDensity === 'comfortable' }" title="Comfortable layout" @click="setGridDensity('comfortable')">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></svg>
               </button>
-              <button type="button" :class="{ 'density-switch__active': gridDensity === 'compact' }" title="Compact layout" @click="setGridDensity('compact')">
+              <button type="button" data-testid="density-compact" :aria-pressed="gridDensity === 'compact'" :class="{ 'density-switch__active': gridDensity === 'compact' }" title="Compact layout" @click="setGridDensity('compact')">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h4v4H4zM10 4h4v4h-4zM16 4h4v4h-4zM4 10h4v4H4zM10 10h4v4h-4zM16 10h4v4h-4zM4 16h4v4H4zM10 16h4v4h-4zM16 16h4v4h-4z" /></svg>
               </button>
             </div>
@@ -707,14 +717,14 @@ onUnmounted(() => {
           @press="enqueue"
           @remove="removeButtonFromBoard"
         />
-        <div v-else class="empty-board">
+        <div v-else class="empty-board" data-testid="empty-board">
           <strong>{{ soundSearch ? 'No matching signals' : 'No signals configured yet' }}</strong>
           <p class="muted">{{ soundSearch ? 'Try another search.' : 'A main driver can add sounds from Manage.' }}</p>
           <button v-if="soundSearch" class="ghost" @click="soundSearch = ''">Clear search</button>
         </div>
       </section>
 
-      <section v-if="roomState.queue.length" class="queue-preview" aria-label="Request queue">
+      <section v-if="roomState.queue.length" class="queue-preview" data-testid="queue-preview" aria-label="Request queue">
         <div class="queue-preview__title"><span>{{ roomState.queue.length }}</span> waiting</div>
         <div class="queue-preview__items">
           <span v-for="(queued, index) in roomState.queue.slice(0, 4)" :key="queued.id" class="queue-chip">
@@ -724,25 +734,25 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <section v-if="showSettings" class="card control-center">
+      <section v-if="showSettings" class="card control-center" data-testid="control-center">
         <div class="control-center__header">
           <div>
             <span class="section-kicker">Room controls</span>
             <h2>Control center</h2>
           </div>
-          <button class="ghost control-center__close" @click="showSettings = false">Done</button>
+          <button class="ghost control-center__close" data-testid="controls-close" @click="showSettings = false">Done</button>
         </div>
 
         <nav class="settings-tabs" aria-label="Room settings">
-          <button :class="{ 'settings-tabs__active': settingsTab === 'room' }" @click="settingsTab = 'room'">Room</button>
-          <button :class="{ 'settings-tabs__active': settingsTab === 'people' }" @click="settingsTab = 'people'">
+          <button data-testid="tab-room" :class="{ 'settings-tabs__active': settingsTab === 'room' }" @click="settingsTab = 'room'">Room</button>
+          <button data-testid="tab-people" :class="{ 'settings-tabs__active': settingsTab === 'people' }" @click="settingsTab = 'people'">
             People <span>{{ roomState.participants.length }}</span>
           </button>
-          <button :class="{ 'settings-tabs__active': settingsTab === 'activity' }" @click="settingsTab = 'activity'">Activity</button>
-          <button :class="{ 'settings-tabs__active': settingsTab === 'manage' }" @click="settingsTab = 'manage'">Manage</button>
+          <button data-testid="tab-activity" :class="{ 'settings-tabs__active': settingsTab === 'activity' }" @click="settingsTab = 'activity'">Activity</button>
+          <button data-testid="tab-manage" :class="{ 'settings-tabs__active': settingsTab === 'manage' }" @click="settingsTab = 'manage'">Manage</button>
         </nav>
 
-        <div v-if="settingsTab === 'room'" class="settings-pane settings-grid">
+        <div v-if="settingsTab === 'room'" class="settings-pane settings-grid" data-testid="pane-room">
           <section class="settings-tile settings-tile--invite">
             <div>
               <span class="settings-tile__label">Invite code</span>
@@ -765,8 +775,8 @@ onUnmounted(() => {
             <span class="settings-tile__label">Driver controls</span>
             <h3>Claim main driver</h3>
             <p class="muted">Use the PIN provided by the room creator.</p>
-            <form class="inline-form" @submit.prevent="claimMainDriver">
-              <input v-model="claimPin" type="password" minlength="6" autocomplete="current-password" placeholder="Room PIN" />
+            <form class="inline-form" data-testid="claim-driver-form" @submit.prevent="claimMainDriver">
+              <input v-model="claimPin" data-testid="claim-driver-pin" type="password" minlength="6" autocomplete="current-password" placeholder="Room PIN" />
               <button class="warn" :disabled="isClaiming || !claimPin.trim()" type="submit">{{ isClaiming ? 'Checking…' : 'Claim' }}</button>
             </form>
           </section>
@@ -778,18 +788,18 @@ onUnmounted(() => {
             </div>
             <div class="volume-control">
               <span aria-hidden="true">−</span>
-              <input type="range" min="0" max="200" step="5" :value="playbackVolumePercent" aria-label="Playback volume" @input="onPlaybackVolumeInput" />
+              <input type="range" data-testid="playback-volume" min="0" max="200" step="5" :value="playbackVolumePercent" aria-label="Playback volume" @input="onPlaybackVolumeInput" />
               <span aria-hidden="true">＋</span>
             </div>
           </section>
         </div>
 
-        <div v-else-if="settingsTab === 'people'" class="settings-pane">
+        <div v-else-if="settingsTab === 'people'" class="settings-pane" data-testid="pane-people">
           <div class="pane-intro"><div><h3>Riders</h3><p class="muted">Live presence from the last two minutes.</p></div><span class="badge ok">{{ activeParticipantCount }} online</span></div>
           <PresenceList :participants="roomState.participants" />
         </div>
 
-        <div v-else-if="settingsTab === 'activity'" class="settings-pane activity-grid">
+        <div v-else-if="settingsTab === 'activity'" class="settings-pane activity-grid" data-testid="pane-activity">
           <section class="activity-section">
             <div class="pane-intro"><div><h3>Queue</h3><p class="muted">Requests waiting behind the current signal.</p></div><span class="badge off">{{ roomState.queue.length }}</span></div>
             <p v-if="!roomState.queue.length" class="empty-copy">Nothing is waiting.</p>
@@ -830,7 +840,7 @@ onUnmounted(() => {
           </details>
         </div>
 
-        <div v-else class="settings-pane">
+        <div v-else class="settings-pane" data-testid="pane-manage">
           <MainDriverPanel
             v-if="roomState.isMainDriver"
             :room-id="roomState.room.id"
@@ -849,7 +859,7 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <section v-if="showLiveRequestDock" class="live-request-dock">
+      <section v-if="showLiveRequestDock" class="live-request-dock" data-testid="live-request-dock">
         <ActiveRequestPanel
           :active-request="roomState.activeRequest"
           :is-main-driver="roomState.isMainDriver"
@@ -861,7 +871,7 @@ onUnmounted(() => {
       </section>
     </template>
 
-    <section v-if="!isUnlocked && roomState" class="audio-prompt-banner" :class="{ 'audio-prompt-banner--above-dock': showLiveRequestDock }">
+    <section v-if="!isUnlocked && roomState" class="audio-prompt-banner" data-testid="audio-prompt" :class="{ 'audio-prompt-banner--above-dock': showLiveRequestDock }">
       <div class="audio-prompt-banner__card">
         <span class="audio-prompt-banner__icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M4 10h4l5-4v12l-5-4H4v-4zm12-2a6 6 0 010 8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" /></svg>
@@ -871,8 +881,27 @@ onUnmounted(() => {
       </div>
     </section>
 
+    <ConfirmDialog
+      :open="Boolean(pendingBoardButtonDelete)"
+      title="Delete signal?"
+      :description="`This removes “${pendingBoardButtonDelete?.label ?? 'this signal'}” and its sound from the room.`"
+      confirm-label="Delete signal"
+      :busy="isRemovingButton"
+      @cancel="pendingBoardButtonDelete = null"
+      @confirm="confirmRemoveButtonFromBoard"
+    />
+
     <Transition name="toast">
-      <div v-if="pageError || pageSuccess" class="page-toast" :class="pageError ? 'page-toast--error' : 'page-toast--success'" role="status">
+      <div
+        v-if="pageError || pageSuccess"
+        class="page-toast"
+        :class="[
+          pageError ? 'page-toast--error' : 'page-toast--success',
+          { 'page-toast--above-dock': showLiveRequestDock },
+        ]"
+        role="status"
+        data-testid="page-toast"
+      >
         <span>{{ pageError || pageSuccess }}</span>
         <button aria-label="Dismiss message" @click="clearMessages">×</button>
       </div>
@@ -907,10 +936,10 @@ onUnmounted(() => {
 .icon-control {
   align-items: center;
   align-self: start;
-  background: #f5f8fb;
+  background: var(--surface-muted);
   border: 1px solid var(--panel-border);
   border-radius: 12px;
-  color: #40556f;
+  color: var(--text-muted);
   display: inline-flex;
   height: 42px;
   justify-content: center;
@@ -927,14 +956,14 @@ onUnmounted(() => {
 
 .icon-control:hover:not(:disabled) {
   background: var(--blue-soft);
-  border-color: #bfd0e3;
+  border-color: var(--info-border);
   box-shadow: none;
   color: var(--blue);
 }
 
 .icon-control--active {
   background: var(--accent-soft);
-  border-color: #acd5c5;
+  border-color: var(--accent-border);
   color: var(--accent);
 }
 
@@ -999,10 +1028,10 @@ onUnmounted(() => {
 
 .status-pill {
   align-items: center;
-  background: #f3f6fa;
-  border: 1px solid #e0e6ef;
+  background: var(--surface-muted);
+  border: 1px solid var(--border-subtle);
   border-radius: 999px;
-  color: #596a80;
+  color: var(--text-muted);
   display: inline-flex;
   font-size: 0.72rem;
   font-weight: 800;
@@ -1012,7 +1041,7 @@ onUnmounted(() => {
 }
 
 button.status-pill {
-  min-height: 40px;
+  min-height: 44px;
   padding-left: 0.72rem;
   padding-right: 0.72rem;
 }
@@ -1031,20 +1060,20 @@ button.status-pill:hover:not(:disabled) {
 
 .status-pill--ok {
   background: var(--ok-soft);
-  border-color: #c8e6d2;
-  color: #287246;
+  border-color: var(--success-border);
+  color: var(--success-text);
 }
 
 .status-pill--warn {
   background: var(--warn-soft);
-  border-color: #efd5a8;
-  color: #925d17;
+  border-color: var(--warning-border);
+  color: var(--warning-text);
 }
 
 .status-pill--neutral {
-  background: #f3f6fa;
+  background: var(--surface-muted);
   border-color: #e0e6ef;
-  color: #596a80;
+  color: var(--text-muted);
 }
 
 .connection-card,
@@ -1072,7 +1101,7 @@ button.status-pill:hover:not(:disabled) {
 
 .loading-spinner {
   animation: spin 0.8s linear infinite;
-  border: 3px solid #dfe7f0;
+  border: 3px solid var(--border-subtle);
   border-radius: 999px;
   border-top-color: var(--accent);
   height: 28px;
@@ -1104,7 +1133,7 @@ button.status-pill:hover:not(:disabled) {
 .empty-state__link {
   background: var(--accent);
   border-radius: 12px;
-  color: #fff;
+  color: var(--text-inverse);
   font-weight: 800;
   margin-top: 0.8rem;
   padding: 0.65rem 1rem;
@@ -1193,7 +1222,7 @@ button.status-pill:hover:not(:disabled) {
 }
 
 .sound-search svg {
-  color: #75859a;
+  color: var(--text-soft);
   height: 17px;
   left: 0.7rem;
   position: absolute;
@@ -1208,8 +1237,8 @@ button.status-pill:hover:not(:disabled) {
 }
 
 .density-switch {
-  background: #f0f4f8;
-  border: 1px solid #dce4ee;
+  background: var(--surface-hover);
+  border: 1px solid var(--border-subtle);
   border-radius: 11px;
   display: flex;
   padding: 3px;
@@ -1218,7 +1247,7 @@ button.status-pill:hover:not(:disabled) {
 .density-switch button {
   background: transparent;
   border-radius: 8px;
-  color: #748399;
+  color: var(--text-soft);
   height: 40px;
   min-height: 40px;
   padding: 0;
@@ -1226,13 +1255,13 @@ button.status-pill:hover:not(:disabled) {
 }
 
 .density-switch button:hover:not(:disabled) {
-  background: #fff;
+  background: var(--surface-raised);
   box-shadow: none;
   transform: none;
 }
 
 .density-switch .density-switch__active {
-  background: #fff;
+  background: var(--surface-raised);
   box-shadow: var(--shadow-sm);
   color: var(--accent);
 }
@@ -1255,13 +1284,13 @@ button.status-pill:hover:not(:disabled) {
 
 .soundboard-notice--warn {
   background: var(--warn-soft);
-  border: 1px solid #efd5a8;
-  color: #825315;
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
 }
 
 .soundboard-notice button {
-  min-height: 38px;
-  padding: 0.4rem 0.7rem;
+  min-height: 44px;
+  padding: 0.55rem 0.8rem;
 }
 
 .empty-board {
@@ -1322,9 +1351,9 @@ button.status-pill:hover:not(:disabled) {
 
 .queue-chip {
   align-items: center;
-  background: #f2f5f9;
+  background: var(--surface-muted);
   border-radius: 999px;
-  color: #53647a;
+  color: var(--text-muted);
   display: inline-flex;
   flex: 0 0 auto;
   font-size: 0.73rem;
@@ -1394,7 +1423,7 @@ button.status-pill:hover:not(:disabled) {
 
 .settings-tabs button span {
   align-items: center;
-  background: #edf1f5;
+  background: var(--neutral-surface);
   border-radius: 999px;
   display: inline-flex;
   font-size: 0.65rem;
@@ -1524,7 +1553,7 @@ button.status-pill:hover:not(:disabled) {
 
 .activity-list li {
   align-items: flex-start;
-  border-top: 1px solid #e1e7ef;
+  border-top: 1px solid var(--border-subtle);
   display: flex;
   gap: 0.6rem;
   padding: 0.65rem 0;
@@ -1552,8 +1581,8 @@ button.status-pill:hover:not(:disabled) {
 
 .activity-dot,
 .activity-list__number {
-  background: #9aabba;
-  border: 4px solid #e8edf3;
+  background: var(--text-soft);
+  border: 4px solid var(--neutral-surface);
   border-radius: 999px;
   flex: 0 0 auto;
   height: 14px;
@@ -1563,12 +1592,12 @@ button.status-pill:hover:not(:disabled) {
 
 .activity-dot--accepted {
   background: var(--ok);
-  border-color: #dcefe3;
+  border-color: var(--success-border);
 }
 
 .activity-dot--rejected {
   background: var(--danger);
-  border-color: #f7dddc;
+  border-color: var(--danger-border);
 }
 
 .activity-list--queue {
@@ -1618,8 +1647,8 @@ button.status-pill:hover:not(:disabled) {
 
 .diagnostics__status button {
   margin-left: auto;
-  min-height: 32px;
-  padding: 0.3rem 0.55rem;
+  min-height: 40px;
+  padding: 0.45rem 0.7rem;
 }
 
 .diagnostic-list {
@@ -1695,8 +1724,8 @@ button.status-pill:hover:not(:disabled) {
 
 .audio-prompt-banner__card {
   align-items: center;
-  background: #fffaf1;
-  border: 1px solid #e8c88f;
+  background: var(--warning-surface);
+  border: 1px solid var(--warning-border);
   border-radius: 16px;
   box-shadow: var(--shadow-lg);
   display: grid;
@@ -1724,7 +1753,7 @@ button.status-pill:hover:not(:disabled) {
 }
 
 .audio-prompt-banner p {
-  color: #806236;
+  color: var(--warning-text);
   font-size: 0.76rem;
   margin: 0.1rem 0 0;
 }
@@ -1743,32 +1772,38 @@ button.status-pill:hover:not(:disabled) {
   left: 50%;
   max-width: min(92vw, 520px);
   padding: 0.65rem 0.75rem 0.65rem 0.9rem;
+  pointer-events: none;
   position: fixed;
   transform: translateX(-50%);
   width: max-content;
   z-index: 100;
 }
 
+.page-toast--above-dock {
+  bottom: 8.4rem;
+}
+
 .page-toast--success {
-  background: #effaf3;
-  border-color: #b6dec4;
-  color: #286c43;
+  background: var(--success-surface);
+  border-color: var(--success-border);
+  color: var(--success-text);
 }
 
 .page-toast--error {
-  background: #fff2f1;
-  border-color: #ebbbb8;
-  color: #983834;
+  background: var(--danger-surface);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
 }
 
 .page-toast button {
   background: transparent;
+  pointer-events: auto;
   color: currentColor;
   font-size: 1rem;
-  height: 28px;
-  min-height: 28px;
+  height: 40px;
+  min-height: 40px;
   padding: 0;
-  width: 28px;
+  width: 40px;
 }
 
 .page-toast button:hover:not(:disabled) {
@@ -1805,7 +1840,10 @@ button.status-pill:hover:not(:disabled) {
   }
 
   .room-header__title-line .badge {
-    display: none;
+    flex: 0 0 auto;
+    font-size: 0.58rem;
+    min-height: 20px;
+    padding: 0.2rem 0.4rem;
   }
 
   .room-header__actions {
@@ -1814,9 +1852,9 @@ button.status-pill:hover:not(:disabled) {
 
   .icon-control {
     border-radius: 10px;
-    height: 38px;
-    min-height: 38px;
-    width: 38px;
+    height: 40px;
+    min-height: 40px;
+    width: 40px;
   }
 
   .room-status-strip {
@@ -1875,10 +1913,6 @@ button.status-pill:hover:not(:disabled) {
 }
 
 @media (max-width: 520px) {
-  .room-header__actions .icon-control:first-child {
-    display: none;
-  }
-
   .join-gate__copy {
     align-items: flex-start;
   }

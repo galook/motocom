@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
@@ -181,7 +181,7 @@ export const joinRoom = mutation({
 
     const room = await getRoomByCode(ctx, args.roomCode);
     if (!room) {
-      throw new Error("Room not found");
+      throw new ConvexError("Room not found");
     }
 
     const now = Date.now();
@@ -285,8 +285,15 @@ export const claimMainDriver = mutation({
     }
     await ctx.db.patch(room._id, roomPatch);
 
-    if (!participant.isMainDriver) {
-      await ctx.db.patch(participant._id, { isMainDriver: true });
+    const roomParticipants = await ctx.db
+      .query("participants")
+      .withIndex("by_room", (q) => q.eq("roomId", room._id))
+      .collect();
+    for (const roomParticipant of roomParticipants) {
+      const shouldBeMainDriver = roomParticipant._id === participant._id;
+      if (roomParticipant.isMainDriver !== shouldBeMainDriver) {
+        await ctx.db.patch(roomParticipant._id, { isMainDriver: shouldBeMainDriver });
+      }
     }
 
     return { granted: true };

@@ -61,6 +61,41 @@ describe("Convex endpoint security and integrity", () => {
     expect(rooms[0].mainDriverPinSalt).toBeTruthy();
   });
 
+  it("transfers the exclusive main-driver role after a valid PIN claim", async () => {
+    const t = convexTest(schema, modules);
+    const created = await createTestRoom(t, "004");
+    const joined = await t.mutation(api.rooms.joinRoom, {
+      roomCode: "SEC004",
+      displayName: "Replacement Driver",
+      participantToken: RIDER_TOKEN,
+    });
+
+    await expect(
+      t.mutation(api.rooms.claimMainDriver, {
+        roomId: created.roomId,
+        pin: "123456",
+        participantToken: RIDER_TOKEN,
+      }),
+    ).resolves.toEqual({ granted: true });
+
+    const presence = await t.query(api.rooms.getRoomPresence, {
+      roomCode: "SEC004",
+    });
+    expect(presence).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: String(created.participantId),
+        displayName: "Driver",
+        isMainDriver: false,
+      }),
+      expect.objectContaining({
+        id: String(joined.participantId),
+        displayName: "Replacement Driver",
+        isMainDriver: true,
+      }),
+    ]));
+    expect(presence.filter((participant) => participant.isMainDriver)).toHaveLength(1);
+  });
+
   it("rejects main-driver mutations when a public participant id is used as a credential", async () => {
     const t = convexTest(schema, modules);
     const created = await createTestRoom(t, "002");

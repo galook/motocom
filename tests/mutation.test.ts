@@ -160,6 +160,35 @@ describe("toErrorMessage", () => {
     expect(toErrorMessage({ message: "bad request" })).toBe("bad request");
   });
 
+  it("prefers safe Convex error data", () => {
+    expect(toErrorMessage({ data: "Room not found", message: "Server Error" })).toBe(
+      "Room not found",
+    );
+    expect(toErrorMessage({ data: { message: "PIN is incorrect" } })).toBe(
+      "PIN is incorrect",
+    );
+  });
+
+  it("extracts the safe message from ConvexError text", () => {
+    expect(
+      toErrorMessage(
+        new Error(
+          "[CONVEX M(rooms:joinRoom)] Server Error\nUncaught ConvexError: Room not found\nCalled by client",
+        ),
+      ),
+    ).toBe("Room not found");
+  });
+
+  it("does not expose redacted Convex request identifiers", () => {
+    expect(
+      toErrorMessage(
+        new Error(
+          "[CONVEX M(rooms:joinRoom)] [Request ID: secret-request-id] Server Error\nCalled by client",
+        ),
+      ),
+    ).toBe("The request could not be completed. Please check the room details and try again.");
+  });
+
   it("falls back for unknown values", () => {
     expect(toErrorMessage({ code: 500 })).toBe("Unexpected error");
     expect(toErrorMessage(null)).toBe("Unexpected error");

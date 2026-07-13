@@ -203,7 +203,10 @@ const joinRoom = async () => {
     }
     await navigateTo(`/room/${selectedCode}`);
   } catch (error) {
-    errorMessage.value = toErrorMessage(error);
+    const message = toErrorMessage(error);
+    errorMessage.value = /\[CONVEX\b[\s\S]*Server Error|Called by client|The request could not be completed/i.test(message)
+      ? "Room not found or no longer available. Check the invitation code and try again."
+      : message;
   } finally {
     isJoining.value = false;
   }
@@ -255,7 +258,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="home-page">
+  <main class="home-page" data-testid="home-page">
     <header class="home-nav">
       <NuxtLink class="brand" to="/" aria-label="Motocom home">
         <span class="brand__mark" aria-hidden="true">
@@ -266,7 +269,7 @@ onUnmounted(() => {
         </span>
         <span>Motocom</span>
       </NuxtLink>
-      <button v-if="installPrompt" class="ghost home-nav__install" :disabled="isInstalling" @click="installApp">
+      <button v-if="installPrompt" class="ghost home-nav__install" data-testid="install-app" :disabled="isInstalling" @click="installApp">
         {{ isInstalling ? 'Installing…' : 'Install app' }}
       </button>
     </header>
@@ -285,12 +288,13 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <section class="entry-card" aria-labelledby="entry-title">
+      <section class="entry-card" data-testid="entry-card" aria-labelledby="entry-title">
         <div class="mode-switch" role="tablist" aria-label="Room action">
           <button
             role="tab"
             :aria-selected="activeMode === 'join'"
             :class="{ 'mode-switch__button--active': activeMode === 'join' }"
+            data-testid="mode-join"
             @click="activeMode = 'join'"
           >
             Join a ride
@@ -299,6 +303,7 @@ onUnmounted(() => {
             role="tab"
             :aria-selected="activeMode === 'create'"
             :class="{ 'mode-switch__button--active': activeMode === 'create' }"
+            data-testid="mode-create"
             @click="activeMode = 'create'"
           >
             Create a room
@@ -314,12 +319,13 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <form class="entry-form" @submit.prevent="joinRoom">
+          <form class="entry-form" data-testid="join-form" @submit.prevent="joinRoom">
             <div>
               <label for="join-room-code">Room code</label>
               <input
                 id="join-room-code"
                 v-model="joinRoomCode"
+                data-testid="join-room-code"
                 class="code-input"
                 maxlength="12"
                 autocapitalize="characters"
@@ -330,9 +336,9 @@ onUnmounted(() => {
             </div>
             <div>
               <label for="join-display-name">Your name</label>
-              <input id="join-display-name" v-model="joinDisplayName" maxlength="48" autocomplete="name" placeholder="Alex" />
+              <input id="join-display-name" v-model="joinDisplayName" data-testid="join-display-name" maxlength="48" autocomplete="name" placeholder="Alex" />
             </div>
-            <button class="entry-submit" :disabled="!canJoinRoom" type="submit">
+            <button class="entry-submit" data-testid="join-submit" :disabled="!canJoinRoom" type="submit">
               <span>{{ isJoining ? 'Joining…' : 'Join room' }}</span>
               <span aria-hidden="true">→</span>
             </button>
@@ -348,21 +354,22 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <form class="entry-form" @submit.prevent="createRoom">
+          <form class="entry-form" data-testid="create-form" @submit.prevent="createRoom">
             <div>
               <label for="create-room-name">Ride name</label>
-              <input id="create-room-name" v-model="createRoomName" maxlength="80" placeholder="Sunday mountain ride" />
+              <input id="create-room-name" v-model="createRoomName" data-testid="create-room-name" maxlength="80" placeholder="Sunday mountain ride" />
             </div>
             <div class="entry-form__split">
               <div>
                 <label for="create-display-name">Your name</label>
-                <input id="create-display-name" v-model="createDisplayName" maxlength="48" autocomplete="name" placeholder="Alex" />
+                <input id="create-display-name" v-model="createDisplayName" data-testid="create-display-name" maxlength="48" autocomplete="name" placeholder="Alex" />
               </div>
               <div>
                 <label for="create-pin">Driver PIN</label>
                 <input
                   id="create-pin"
                   v-model="createPin"
+                  data-testid="create-pin"
                   type="password"
                   minlength="6"
                   autocomplete="new-password"
@@ -371,19 +378,19 @@ onUnmounted(() => {
               </div>
             </div>
             <p class="form-hint">The PIN lets another trusted rider take over as main driver.</p>
-            <button class="entry-submit" :disabled="!canCreateRoom" type="submit">
+            <button class="entry-submit" data-testid="create-submit" :disabled="!canCreateRoom" type="submit">
               <span>{{ isCreating ? 'Creating…' : 'Create room' }}</span>
               <span aria-hidden="true">→</span>
             </button>
           </form>
         </div>
 
-        <p v-if="connectionWarning" class="error entry-alert">{{ connectionWarning }}</p>
-        <p v-else-if="errorMessage" class="error entry-alert">{{ errorMessage }}</p>
+        <p v-if="connectionWarning" class="error entry-alert" data-testid="entry-error">{{ connectionWarning }}</p>
+        <p v-else-if="errorMessage" class="error entry-alert" data-testid="entry-error">{{ errorMessage }}</p>
       </section>
     </section>
 
-    <section v-if="recentRooms.length" class="recent-section">
+    <section v-if="recentRooms.length" class="recent-section" data-testid="recent-rooms">
       <div class="section-heading">
         <div>
           <span class="eyebrow">Quick access</span>
@@ -392,7 +399,7 @@ onUnmounted(() => {
         <span class="muted">Stored only on this device</span>
       </div>
       <div class="recent-grid">
-        <article v-for="room in recentRooms" :key="room.code" class="recent-room">
+        <article v-for="room in recentRooms" :key="room.code" class="recent-room" data-testid="recent-room" :data-room-code="room.code">
           <button class="recent-room__main" @click="selectRecentRoom(room)">
             <span class="recent-room__name">{{ room.name }}</span>
             <span class="recent-room__code">{{ room.code }}</span>
@@ -449,7 +456,7 @@ onUnmounted(() => {
   align-items: center;
   background: var(--accent);
   border-radius: 11px;
-  color: #fff;
+  color: var(--text-inverse);
   display: inline-flex;
   height: 36px;
   justify-content: center;
@@ -462,8 +469,8 @@ onUnmounted(() => {
 }
 
 .home-nav__install {
-  min-height: 38px;
-  padding: 0.45rem 0.75rem;
+  min-height: 40px;
+  padding: 0.5rem 0.8rem;
 }
 
 .home-hero {
@@ -538,7 +545,7 @@ onUnmounted(() => {
 }
 
 .mode-switch {
-  background: #f1f5f9;
+  background: var(--surface-hover);
   display: grid;
   gap: 4px;
   grid-template-columns: 1fr 1fr;
@@ -560,7 +567,7 @@ onUnmounted(() => {
 }
 
 .mode-switch .mode-switch__button--active {
-  background: #fff;
+  background: var(--surface-raised);
   box-shadow: var(--shadow-sm);
   color: var(--text-main);
 }
@@ -666,7 +673,7 @@ onUnmounted(() => {
 }
 
 .recent-room {
-  background: #fff;
+  background: var(--surface-raised);
   border: 1px solid var(--panel-border);
   border-radius: 14px;
   display: grid;

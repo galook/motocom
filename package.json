@@ -22,6 +22,11 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:desktop": "playwright test --project=chromium-desktop",
+    "test:e2e:mobile": "playwright test --project=chromium-mobile",
+    "test:e2e:ui": "playwright test --ui",
+    "test:all": "npm run test && npm run typecheck && npm run test:e2e",
     "typecheck": "nuxt typecheck",
     "deploy:now": "bash scripts/auto-deploy.sh",
     "deploy:watch": "bash scripts/deploy-watcher.sh"
@@ -35,10 +40,13 @@
     "vue-router": "^4.5.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1",
     "@vite-pwa/nuxt": "^1.1.1",
     "@vitejs/plugin-vue": "^6.0.4",
     "@vitest/coverage-v8": "^4.1.10",
     "@vue/test-utils": "^2.4.6",
+    "axe-core": "^4.12.1",
     "convex-test": "^0.0.54",
     "jsdom": "^24.1.1",
     "typescript": "^5.6.3",

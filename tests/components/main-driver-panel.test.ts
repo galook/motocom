@@ -97,7 +97,7 @@ describe("MainDriverPanel", () => {
   it("validates create button inputs", async () => {
     const wrapper = await mountPanel();
 
-    await findButtonByLabel(wrapper, "Create Button").trigger("click");
+    await findButtonByLabel(wrapper, "Create signal").trigger("click");
 
     expect(wrapper.text()).toContain("New button needs both label and a source file (audio or video).");
     expect(runMutationMock).not.toHaveBeenCalled();
@@ -117,7 +117,7 @@ describe("MainDriverPanel", () => {
     });
     await fileInput.trigger("change");
 
-    await findButtonByLabel(wrapper, "Create Button").trigger("click");
+    await findButtonByLabel(wrapper, "Create signal").trigger("click");
     await flushPromises();
 
     expect(wrapper.text()).toContain("Unsupported file format");
@@ -148,12 +148,12 @@ describe("MainDriverPanel", () => {
     });
     await fileInput.trigger("change");
 
-    await findButtonByLabel(wrapper, "Create Button").trigger("click");
+    await findButtonByLabel(wrapper, "Create signal").trigger("click");
     await flushPromises();
 
     expect(fetchMock).toHaveBeenCalledWith("https://upload.example", expect.any(Object));
     expect(runMutationMock).toHaveBeenCalledTimes(2);
-    expect(wrapper.text()).toContain("Button created.");
+    expect(wrapper.text()).toContain("Signal created.");
   });
 
   it("saves a template from current setup", async () => {
@@ -168,7 +168,7 @@ describe("MainDriverPanel", () => {
     const templateInput = wrapper.find('input[placeholder="Example: Weekend Ride"]');
     await templateInput.setValue("My Ride");
 
-    await findButtonByLabel(wrapper, "Save Current Setup as Template").trigger("click");
+    await findButtonByLabel(wrapper, "Save setup as template").trigger("click");
     await flushPromises();
 
     expect(runMutationMock).toHaveBeenCalledTimes(1);
@@ -192,10 +192,12 @@ describe("MainDriverPanel", () => {
       ],
     });
 
-    await findButtonByLabel(wrapper, "Apply Template to This Room").trigger("click");
+    await findButtonByLabel(wrapper, "Apply template").trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-testid="confirm-submit"]').trigger("click");
     await flushPromises();
 
     expect(runMutationMock).toHaveBeenCalledTimes(1);
-    expect(wrapper.text()).toContain("Template applied (4 buttons).");
+    expect(wrapper.text()).toContain("Template applied (4 signals).");
   });
 });

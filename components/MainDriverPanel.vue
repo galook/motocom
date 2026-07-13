@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ConfirmDialog from "~/components/ConfirmDialog.vue";
 import { api } from "~/convex/_generated/api";
 import {
   buildConnectivityHint,
@@ -29,8 +30,11 @@ function toTemplateSummaries(value: unknown): RoomTemplateSummary[] {
 
 const draftLabel = ref("");
 const draftFile = ref<File | null>(null);
+const draftFileInput = ref<HTMLInputElement | null>(null);
 const acceptFile = ref<File | null>(null);
+const acceptFileInput = ref<HTMLInputElement | null>(null);
 const rejectFile = ref<File | null>(null);
+const rejectFileInput = ref<HTMLInputElement | null>(null);
 const templateName = ref("");
 const selectedTemplateId = ref("");
 const panelError = ref("");
@@ -68,6 +72,11 @@ const dirtyButtonIds = reactive(new Set<string>());
 const pendingCreateOperationId = ref("");
 const pendingCreateStorageId = ref<string | null>(null);
 const pendingCreateFingerprint = ref("");
+type DriverConfirmation =
+  | { kind: "delete-button"; buttonId: string; label: string }
+  | { kind: "apply-template"; templateName: string }
+  | { kind: "delete-template"; templateName: string };
+const pendingConfirmation = ref<DriverConfirmation | null>(null);
 
 watch(
   () => props.buttons,
@@ -125,6 +134,39 @@ const templates = computed<RoomTemplateSummary[]>(() => toTemplateSummaries(temp
 const selectedTemplate = computed(
   () => templates.value.find((template) => template.id === selectedTemplateId.value) ?? null,
 );
+const confirmationCopy = computed(() => {
+  const pending = pendingConfirmation.value;
+  if (!pending) {
+    return {
+      title: "Confirm action",
+      description: "Continue with this action?",
+      confirmLabel: "Confirm",
+      tone: "danger" as const,
+    };
+  }
+  if (pending.kind === "delete-button") {
+    return {
+      title: "Delete signal?",
+      description: `This permanently removes “${pending.label}” and its uploaded sound.`,
+      confirmLabel: "Delete signal",
+      tone: "danger" as const,
+    };
+  }
+  if (pending.kind === "apply-template") {
+    return {
+      title: "Replace this soundboard?",
+      description: `Applying “${pending.templateName}” replaces every current signal and decision sound in this room.`,
+      confirmLabel: "Apply template",
+      tone: "warning" as const,
+    };
+  }
+  return {
+    title: "Delete template?",
+    description: `This permanently removes “${pending.templateName}” from your saved templates.`,
+    confirmLabel: "Delete template",
+    tone: "danger" as const,
+  };
+});
 
 watch(
   templates,
@@ -391,8 +433,11 @@ const createNewButton = async () => {
 
     draftLabel.value = "";
     draftFile.value = null;
+    if (draftFileInput.value) {
+      draftFileInput.value.value = "";
+    }
     clearCompletedCreate();
-    panelSuccess.value = "Button created.";
+    panelSuccess.value = "Signal created.";
   } catch (error) {
     panelError.value = toErrorMessage(error);
   } finally {
@@ -436,7 +481,7 @@ const saveButton = async (buttonId: string) => {
 
     replacementFiles[buttonId] = null;
     dirtyButtonIds.delete(buttonId);
-    panelSuccess.value = "Button updated.";
+    panelSuccess.value = "Signal updated.";
   } catch (error) {
     void discardUpload(fileStorageId);
     panelError.value = toErrorMessage(error);
@@ -445,7 +490,7 @@ const saveButton = async (buttonId: string) => {
   }
 };
 
-const removeButton = async (buttonId: string) => {
+const removeButton = (buttonId: string) => {
   clearMessages();
   if (!props.appEnabled) {
     panelError.value = APP_LOCKED_MESSAGE;
@@ -456,13 +501,14 @@ const removeButton = async (buttonId: string) => {
     return;
   }
   const targetButton = props.buttons.find((button) => button.id === buttonId);
-  if (process.client) {
-    const confirmed = window.confirm(`Delete "${targetButton?.label ?? "this button"}"?`);
-    if (!confirmed) {
-      return;
-    }
-  }
+  pendingConfirmation.value = {
+    kind: "delete-button",
+    buttonId,
+    label: targetButton?.label ?? "this signal",
+  };
+};
 
+const executeRemoveButton = async (buttonId: string) => {
   isSaving.value = true;
   try {
     await runMutation(deleteButton, {
@@ -473,7 +519,8 @@ const removeButton = async (buttonId: string) => {
       operationName: "Delete button",
       convexUrl,
     });
-    panelSuccess.value = "Button deleted.";
+    pendingConfirmation.value = null;
+    panelSuccess.value = "Signal deleted.";
   } catch (error) {
     panelError.value = toErrorMessage(error);
   } finally {
@@ -515,7 +562,13 @@ const saveOutcomeSounds = async () => {
 
     acceptFile.value = null;
     rejectFile.value = null;
-    panelSuccess.value = "Outcome sounds saved.";
+    if (acceptFileInput.value) {
+      acceptFileInput.value.value = "";
+    }
+    if (rejectFileInput.value) {
+      rejectFileInput.value.value = "";
+    }
+    panelSuccess.value = "Decision sounds saved.";
   } catch (error) {
     void discardUpload(acceptStorageId);
     void discardUpload(rejectStorageId);
@@ -568,7 +621,7 @@ const saveCurrentAsTemplate = async () => {
   }
 };
 
-const applyTemplate = async () => {
+const applyTemplate = () => {
   clearMessages();
   if (!props.appEnabled) {
     panelError.value = APP_LOCKED_MESSAGE;
@@ -583,16 +636,16 @@ const applyTemplate = async () => {
     return;
   }
 
-  if (process.client) {
-    const templateLabel = selectedTemplate.value?.name ?? "this template";
-    const confirmed = window.confirm(
-      `Apply "${templateLabel}" to this room? This replaces all current buttons.`,
-    );
-    if (!confirmed) {
-      return;
-    }
-  }
+  pendingConfirmation.value = {
+    kind: "apply-template",
+    templateName: selectedTemplate.value?.name ?? "this template",
+  };
+};
 
+const executeApplyTemplate = async () => {
+  if (!selectedTemplateId.value) {
+    return;
+  }
   isSaving.value = true;
   try {
     const result = await runMutation<
@@ -608,7 +661,8 @@ const applyTemplate = async () => {
       convexUrl,
     });
 
-    panelSuccess.value = `Template applied (${result.appliedButtonCount} buttons).`;
+    pendingConfirmation.value = null;
+    panelSuccess.value = `Template applied (${result.appliedButtonCount} signals).`;
   } catch (error) {
     panelError.value = toErrorMessage(error);
   } finally {
@@ -616,7 +670,7 @@ const applyTemplate = async () => {
   }
 };
 
-const removeTemplate = async () => {
+const removeTemplate = () => {
   clearMessages();
   if (!props.appEnabled) {
     panelError.value = APP_LOCKED_MESSAGE;
@@ -631,14 +685,16 @@ const removeTemplate = async () => {
     return;
   }
 
-  if (process.client) {
-    const templateLabel = selectedTemplate.value?.name ?? "this template";
-    const confirmed = window.confirm(`Delete template "${templateLabel}"?`);
-    if (!confirmed) {
-      return;
-    }
-  }
+  pendingConfirmation.value = {
+    kind: "delete-template",
+    templateName: selectedTemplate.value?.name ?? "this template",
+  };
+};
 
+const executeRemoveTemplate = async () => {
+  if (!selectedTemplateId.value) {
+    return;
+  }
   isSaving.value = true;
   try {
     await runMutation(deleteTemplate, {
@@ -648,12 +704,29 @@ const removeTemplate = async () => {
       operationName: "Delete template",
       convexUrl,
     });
+    pendingConfirmation.value = null;
     panelSuccess.value = "Template deleted.";
   } catch (error) {
     panelError.value = toErrorMessage(error);
   } finally {
     isSaving.value = false;
   }
+};
+
+const confirmPendingAction = async () => {
+  const pending = pendingConfirmation.value;
+  if (!pending) {
+    return;
+  }
+  if (pending.kind === "delete-button") {
+    await executeRemoveButton(pending.buttonId);
+    return;
+  }
+  if (pending.kind === "apply-template") {
+    await executeApplyTemplate();
+    return;
+  }
+  await executeRemoveTemplate();
 };
 
 onUnmounted(() => {
@@ -664,7 +737,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="driver-panel">
+  <div class="driver-panel" data-testid="driver-panel">
     <div class="driver-panel__intro">
       <div>
         <span class="driver-panel__kicker">Main driver</span>
@@ -677,7 +750,7 @@ onUnmounted(() => {
     <div v-if="!props.appEnabled" class="driver-notice">{{ APP_LOCKED_MESSAGE }}</div>
     <p v-if="connectionWarning" class="error">{{ connectionWarning }}</p>
 
-    <details class="driver-group" open>
+    <details class="driver-group" data-testid="driver-group-create" open>
       <summary>
         <span class="driver-group__icon">＋</span>
         <span><strong>Create signal</strong><small>Add a new large soundboard button</small></span>
@@ -686,22 +759,22 @@ onUnmounted(() => {
       <div class="driver-group__body">
         <div class="row">
           <div class="driver-col">
-            <label>Label</label>
-            <input v-model="draftLabel" maxlength="48" placeholder="Example: Horn" @input="onDraftLabelInput" />
+            <label for="driver-create-label">Label</label>
+            <input id="driver-create-label" v-model="draftLabel" data-testid="driver-create-label" maxlength="48" placeholder="Example: Horn" @input="onDraftLabelInput" />
           </div>
           <div class="driver-col">
-            <label>Sound file</label>
-            <input type="file" :accept="SOURCE_FILE_ACCEPT" @change="(event) => onSelectFile(event, 'draft')" />
+            <label for="driver-create-file">Sound file</label>
+            <input id="driver-create-file" ref="draftFileInput" type="file" data-testid="driver-create-file" :accept="SOURCE_FILE_ACCEPT" @change="(event) => onSelectFile(event, 'draft')" />
             <span class="field-help">Audio or video, up to 8 MB and 20 seconds.</span>
           </div>
         </div>
-        <button class="driver-primary" :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" @click="createNewButton">
-          {{ isSaving ? 'Working…' : 'Create Button' }}
+        <button class="driver-primary" data-testid="driver-create-submit" :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" @click="createNewButton">
+          {{ isSaving ? 'Working…' : 'Create signal' }}
         </button>
       </div>
     </details>
 
-    <details class="driver-group">
+    <details class="driver-group" data-testid="driver-group-templates">
       <summary>
         <span class="driver-group__icon driver-group__icon--blue">▣</span>
         <span><strong>Templates</strong><small>Reuse a complete setup in future rooms</small></span>
@@ -710,16 +783,17 @@ onUnmounted(() => {
       <div class="driver-group__body">
         <div class="row">
           <div class="driver-col">
-            <label>Template name</label>
-            <input v-model="templateName" maxlength="80" placeholder="Example: Weekend Ride" />
+            <label for="template-name">Template name</label>
+            <input id="template-name" v-model="templateName" data-testid="template-name" maxlength="80" placeholder="Example: Weekend Ride" />
           </div>
           <div class="driver-col template-actions">
             <label>&nbsp;</label>
             <button
+              data-testid="template-save"
               :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving || !templateName.trim()"
               @click="saveCurrentAsTemplate"
             >
-              Save Current Setup as Template
+              Save setup as template
             </button>
           </div>
         </div>
@@ -729,8 +803,8 @@ onUnmounted(() => {
         <template v-else>
           <div class="row template-picker">
             <div class="driver-col">
-              <label>Saved templates</label>
-              <select v-model="selectedTemplateId">
+              <label for="template-select">Saved templates</label>
+              <select id="template-select" v-model="selectedTemplateId" data-testid="template-select">
                 <option v-for="template in templates" :key="template.id" :value="template.id">
                   {{ template.name }} · {{ template.buttonCount }} buttons ·
                   {{ template.hasOutcomeSounds ? "with outcomes" : "no outcomes" }}
@@ -743,25 +817,27 @@ onUnmounted(() => {
           </div>
           <div class="row template-action-row">
             <button
+              data-testid="template-apply"
               :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving || !selectedTemplateId"
               class="secondary"
               @click="applyTemplate"
             >
-              Apply Template to This Room
+              Apply template
             </button>
             <button
+              data-testid="template-delete"
               :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving || !selectedTemplateId"
               class="danger"
               @click="removeTemplate"
             >
-              Delete Template
+              Delete template
             </button>
           </div>
         </template>
       </div>
     </details>
 
-    <details class="driver-group">
+    <details class="driver-group" data-testid="driver-group-outcomes">
       <summary>
         <span class="driver-group__icon driver-group__icon--amber">✓</span>
         <span><strong>Decision sounds</strong><small>Audio played after accept or reject</small></span>
@@ -774,21 +850,21 @@ onUnmounted(() => {
         </div>
         <div class="row">
           <div class="driver-col">
-            <label>Accept sound</label>
-            <input type="file" :accept="SOURCE_FILE_ACCEPT" @change="(event) => onSelectFile(event, 'accept')" />
+            <label for="outcome-accept-file">Accept sound</label>
+            <input id="outcome-accept-file" ref="acceptFileInput" type="file" data-testid="outcome-accept-file" :accept="SOURCE_FILE_ACCEPT" @change="(event) => onSelectFile(event, 'accept')" />
           </div>
           <div class="driver-col">
-            <label>Reject sound</label>
-            <input type="file" :accept="SOURCE_FILE_ACCEPT" @change="(event) => onSelectFile(event, 'reject')" />
+            <label for="outcome-reject-file">Reject sound</label>
+            <input id="outcome-reject-file" ref="rejectFileInput" type="file" data-testid="outcome-reject-file" :accept="SOURCE_FILE_ACCEPT" @change="(event) => onSelectFile(event, 'reject')" />
           </div>
         </div>
-        <button :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" class="secondary" @click="saveOutcomeSounds">
-          Save Outcome Sounds
+        <button data-testid="outcome-save" :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" class="secondary" @click="saveOutcomeSounds">
+          Save decision sounds
         </button>
       </div>
     </details>
 
-    <details class="driver-group" :open="buttons.length > 0">
+    <details class="driver-group" data-testid="driver-group-existing" :open="buttons.length > 0">
       <summary>
         <span class="driver-group__icon driver-group__icon--slate">≡</span>
         <span><strong>Existing signals</strong><small>Edit, disable, replace, or remove buttons</small></span>
@@ -797,7 +873,7 @@ onUnmounted(() => {
       <div class="driver-group__body">
         <p v-if="!buttons.length" class="empty-helper">No buttons configured.</p>
 
-        <div v-for="button in buttons" :key="button.id" class="button-row">
+        <div v-for="button in buttons" :key="button.id" class="button-row" data-testid="driver-signal-row" :data-signal-label="button.label">
           <div class="button-row__heading">
             <strong>{{ button.label }}</strong>
             <span class="badge" :class="buttonDrafts[button.id].isEnabled ? 'ok' : 'off'">
@@ -806,16 +882,19 @@ onUnmounted(() => {
           </div>
           <div class="row">
             <div class="driver-col">
-              <label>Label</label>
+              <label :for="`signal-label-${button.id}`">Label</label>
               <input
+                :id="`signal-label-${button.id}`"
                 v-model="buttonDrafts[button.id].label"
+                data-testid="signal-edit-label"
                 maxlength="48"
                 @input="markButtonDirty(button.id)"
               />
             </div>
             <div class="driver-col">
-              <label>Replace sound (optional)</label>
+              <label :for="`signal-file-${button.id}`">Replace sound (optional)</label>
               <input
+                :id="`signal-file-${button.id}`"
                 type="file"
                 :accept="SOURCE_FILE_ACCEPT"
                 @change="(event) => onSelectReplacementFile(event, button.id)"
@@ -823,6 +902,7 @@ onUnmounted(() => {
             </div>
             <label class="toggle-field">
               <input
+                data-testid="signal-enabled"
                 type="checkbox"
                 v-model="buttonDrafts[button.id].isEnabled"
                 @change="markButtonDirty(button.id)"
@@ -832,15 +912,26 @@ onUnmounted(() => {
             </label>
           </div>
           <div class="row button-row__actions">
-            <button :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" class="secondary" @click="saveButton(button.id)">Save</button>
-            <button :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" class="ghost danger-text" @click="removeButton(button.id)">Delete</button>
+            <button data-testid="signal-save" :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" class="secondary" @click="saveButton(button.id)">Save</button>
+            <button data-testid="signal-delete" :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" class="ghost danger-text" @click="removeButton(button.id)">Delete</button>
           </div>
         </div>
       </div>
     </details>
 
-    <p v-if="panelError" class="error driver-message">{{ panelError }}</p>
-    <p v-if="panelSuccess" class="success driver-message">{{ panelSuccess }}</p>
+    <p v-if="panelError" class="error driver-message" data-testid="driver-error">{{ panelError }}</p>
+    <p v-if="panelSuccess" class="success driver-message" data-testid="driver-success">{{ panelSuccess }}</p>
+
+    <ConfirmDialog
+      :open="Boolean(pendingConfirmation)"
+      :title="confirmationCopy.title"
+      :description="confirmationCopy.description"
+      :confirm-label="confirmationCopy.confirmLabel"
+      :tone="confirmationCopy.tone"
+      :busy="isSaving"
+      @cancel="pendingConfirmation = null"
+      @confirm="confirmPendingAction"
+    />
   </div>
 </template>
 
@@ -884,16 +975,16 @@ onUnmounted(() => {
 
 .driver-notice {
   background: var(--warn-soft);
-  border: 1px solid #efd5a8;
+  border: 1px solid var(--warning-border);
   border-radius: 12px;
-  color: #855617;
+  color: var(--warning-text);
   font-size: 0.8rem;
   font-weight: 700;
   padding: 0.7rem;
 }
 
 .driver-group {
-  background: #fff;
+  background: var(--surface-raised);
   border: 1px solid var(--panel-border);
   border-radius: 14px;
   overflow: hidden;
@@ -959,8 +1050,8 @@ onUnmounted(() => {
 }
 
 .driver-group__icon--slate {
-  background: #edf2f7;
-  color: #61748a;
+  background: var(--neutral-surface);
+  color: var(--neutral-text);
 }
 
 .driver-group__chevron {
@@ -1080,7 +1171,7 @@ onUnmounted(() => {
 }
 
 .toggle-field__track {
-  background: #cbd4df;
+  background: var(--border-default);
   border-radius: 999px;
   display: inline-flex;
   height: 24px;
@@ -1090,7 +1181,7 @@ onUnmounted(() => {
 }
 
 .toggle-field__track i {
-  background: #fff;
+  background: var(--surface-raised);
   border-radius: 999px;
   box-shadow: 0 1px 3px rgb(30 45 64 / 20%);
   height: 18px;

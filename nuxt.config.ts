@@ -24,7 +24,12 @@ function isPrivateIpv4(address: string): boolean {
 }
 
 function getPreferredLanAddress(): string | null {
-  const interfaces = networkInterfaces();
+  let interfaces: ReturnType<typeof networkInterfaces>;
+  try {
+    interfaces = networkInterfaces();
+  } catch {
+    return null;
+  }
   const privateCandidates: string[] = [];
   const publicCandidates: string[] = [];
 
@@ -196,6 +201,9 @@ export default defineNuxtConfig({
   },
   app: {
     head: {
+      htmlAttrs: {
+        lang: "en",
+      },
       meta: [
         { name: "theme-color", content: "#f7f9fc" },
         { name: "mobile-web-app-capable", content: "yes" },

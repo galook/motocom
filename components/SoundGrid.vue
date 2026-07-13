@@ -35,13 +35,17 @@ const buttonState = (buttonId: string, isEnabled: boolean): ButtonVisualState =>
 </script>
 
 <template>
-  <div class="sound-grid" :class="`sound-grid--${density}`">
+  <div class="sound-grid" data-testid="sound-grid" :data-density="density" :class="`sound-grid--${density}`">
     <div
       v-for="button in buttons"
       :key="button.id"
       class="sound-cell-wrap"
     >
       <button
+        data-testid="sound-button"
+        :data-button-id="button.id"
+        :data-button-label="button.label"
+        :data-button-state="button.isEnabled ? buttonState(button.id, button.isEnabled) : 'disabled'"
         :disabled="disablePress || !button.isEnabled"
         :class="[
           'sound-cell',
@@ -61,6 +65,7 @@ const buttonState = (buttonId: string, isEnabled: boolean): ButtonVisualState =>
       <button
         v-if="removable"
         class="sound-cell-remove"
+        data-testid="sound-remove"
         type="button"
         :disabled="disablePress"
         :aria-label="`Remove ${button.label}`"
@@ -90,15 +95,15 @@ const buttonState = (buttonId: string, isEnabled: boolean): ButtonVisualState =>
 }
 
 .sound-cell {
-  --state: #718096;
-  --state-soft: #edf2f7;
+  --state: var(--neutral-text);
+  --state-soft: var(--neutral-surface);
   align-items: center;
   background:
     linear-gradient(180deg, rgb(255 255 255 / 98%), rgb(248 250 253 / 98%));
-  border: 1px solid #d7e0eb;
+  border: 1px solid var(--border-subtle);
   border-radius: 18px;
   box-shadow: 0 5px 14px rgb(40 61 86 / 7%);
-  color: #142033;
+  color: var(--text-main);
   display: flex;
   flex-direction: column;
   font-size: clamp(1.05rem, 2.5vw, 1.32rem);
@@ -125,8 +130,8 @@ const buttonState = (buttonId: string, isEnabled: boolean): ButtonVisualState =>
 }
 
 .sound-cell:hover:not(:disabled) {
-  background: #fff;
-  border-color: #b8c7d9;
+  background: var(--surface-raised);
+  border-color: var(--border-strong);
   box-shadow: 0 10px 24px rgb(40 61 86 / 12%);
   transform: translateY(-2px);
 }
@@ -157,7 +162,7 @@ const buttonState = (buttonId: string, isEnabled: boolean): ButtonVisualState =>
 }
 
 .sound-cell__meta {
-  color: #69788c;
+  color: var(--text-muted);
   display: inline-block;
   font-size: 0.72rem;
   font-weight: 750;
@@ -167,30 +172,30 @@ const buttonState = (buttonId: string, isEnabled: boolean): ButtonVisualState =>
 }
 
 .sound-cell--idle {
-  --state: #6b7f96;
-  --state-soft: #e7edf4;
+  --state: var(--neutral-text);
+  --state-soft: var(--neutral-surface);
 }
 
 .sound-cell--pending {
-  --state: #dd8b22;
-  --state-soft: #fff0d8;
-  background: linear-gradient(180deg, #fffdf8, #fff7eb);
-  border-color: #e8b66e;
+  --state: var(--warning);
+  --state-soft: var(--warning-surface);
+  background: linear-gradient(180deg, var(--surface-raised), var(--warning-surface));
+  border-color: var(--warning-border);
   box-shadow: 0 0 0 3px rgb(221 139 34 / 9%), 0 10px 24px rgb(181 110 26 / 12%);
 }
 
 .sound-cell--accepted {
-  --state: #2d9b5d;
-  --state-soft: #dcf3e5;
-  background: linear-gradient(180deg, #fbfffc, #eef9f2);
-  border-color: #8bcaa4;
+  --state: var(--success);
+  --state-soft: var(--success-surface);
+  background: linear-gradient(180deg, var(--surface-raised), var(--success-surface));
+  border-color: var(--success-border);
 }
 
 .sound-cell--rejected {
-  --state: #d25450;
-  --state-soft: #fde5e3;
-  background: linear-gradient(180deg, #fffdfd, #fff0ef);
-  border-color: #e4a19e;
+  --state: var(--danger);
+  --state-soft: var(--danger-surface);
+  background: linear-gradient(180deg, var(--surface-raised), var(--danger-surface));
+  border-color: var(--danger-border);
 }
 
 .sound-cell--pending .sound-cell__pulse,
@@ -210,26 +215,26 @@ const buttonState = (buttonId: string, isEnabled: boolean): ButtonVisualState =>
 
 .sound-cell-remove {
   align-items: center;
-  background: #fff;
-  border: 1px solid #e5b9b6;
+  background: var(--surface-raised);
+  border: 1px solid var(--danger-border);
   border-radius: 999px;
   box-shadow: 0 3px 9px rgb(94 48 45 / 10%);
-  color: #b13f3b;
+  color: var(--danger-text);
   display: inline-flex;
-  font-size: 1rem;
-  height: 30px;
+  font-size: 1.1rem;
+  height: 40px;
   justify-content: center;
-  min-height: 30px;
+  min-height: 40px;
   padding: 0;
   position: absolute;
-  right: 0.55rem;
-  top: 0.55rem;
-  width: 30px;
+  right: 0.45rem;
+  top: 0.45rem;
+  width: 40px;
   z-index: 2;
 }
 
 .sound-cell-remove:hover:not(:disabled) {
-  background: #fff0ef;
+  background: var(--danger-surface);
   box-shadow: 0 4px 12px rgb(94 48 45 / 14%);
 }
 

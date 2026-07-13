@@ -15,7 +15,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="active-panel card" :class="{ 'active-panel--idle': !activeRequest }">
+  <div class="active-panel card" data-testid="active-request-panel" :data-active="Boolean(activeRequest)" :class="{ 'active-panel--idle': !activeRequest }">
     <div class="active-panel__status" aria-hidden="true">
       <span></span>
     </div>
@@ -35,6 +35,7 @@ const emit = defineEmits<{
     <div v-if="activeRequest && isMainDriver" class="active-panel__actions">
       <button
         class="active-panel__accept"
+        data-testid="request-accept"
         :disabled="isResolving"
         @click="emit('resolve', 'accepted')"
       >
@@ -43,6 +44,7 @@ const emit = defineEmits<{
       </button>
       <button
         class="danger active-panel__reject"
+        data-testid="request-reject"
         :disabled="isResolving"
         @click="emit('resolve', 'rejected')"
       >
@@ -73,7 +75,7 @@ const emit = defineEmits<{
 
 .active-panel__status {
   align-items: center;
-  background: #fff0d8;
+  background: var(--warning-surface);
   border-radius: 13px;
   display: inline-flex;
   height: 44px;
@@ -83,21 +85,21 @@ const emit = defineEmits<{
 
 .active-panel__status span {
   animation: request-pulse 1.1s ease-in-out infinite;
-  background: #dc8a22;
-  border: 5px solid #ffe2b4;
+  background: var(--warning);
+  border: 5px solid color-mix(in srgb, var(--warning) 22%, white);
   border-radius: 999px;
   height: 18px;
   width: 18px;
 }
 
 .active-panel--idle .active-panel__status {
-  background: #edf2f7;
+  background: var(--neutral-surface);
 }
 
 .active-panel--idle .active-panel__status span {
   animation: none;
-  background: #78899e;
-  border-color: #dfe6ee;
+  background: var(--neutral-text);
+  border-color: var(--neutral-border);
 }
 
 .active-panel__content {
@@ -107,7 +109,7 @@ const emit = defineEmits<{
 }
 
 .active-panel__eyebrow {
-  color: #8d5b1a;
+  color: var(--warning-text);
   font-size: 0.66rem;
   font-weight: 900;
   letter-spacing: 0.09em;
@@ -141,7 +143,7 @@ const emit = defineEmits<{
 
 .active-panel__actions button {
   gap: 0.35rem;
-  min-height: 46px;
+  min-height: var(--control-height);
   min-width: 106px;
 }
 
@@ -151,15 +153,15 @@ const emit = defineEmits<{
 }
 
 .active-panel__accept {
-  background: var(--ok);
+  background: var(--success);
 }
 
 .active-panel__accept:hover:not(:disabled) {
-  background: #267849;
+  background: var(--success-text);
 }
 
 .active-panel__waiting {
-  background: #f2f5f8;
+  background: var(--surface-muted);
   border-radius: 999px;
   padding: 0.4rem 0.65rem;
   white-space: nowrap;
@@ -172,8 +174,8 @@ const emit = defineEmits<{
 }
 
 @keyframes request-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgb(220 138 34 / 20%); }
-  50% { box-shadow: 0 0 0 8px rgb(220 138 34 / 8%); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--warning) 20%, transparent); }
+  50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--warning) 8%, transparent); }
 }
 
 @media (max-width: 620px) {

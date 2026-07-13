@@ -24,14 +24,14 @@ const formatAgo = (timestamp: number) => {
 </script>
 
 <template>
-  <div class="presence-panel">
+  <div class="presence-panel" data-testid="presence-panel">
     <div class="presence-summary sr-only">
       Participants · Active: {{ participants.filter((participant) => participant.isActive).length }} /
       {{ participants.length }}
     </div>
 
     <ul v-if="participants.length" class="presence-list">
-      <li v-for="participant in participants" :key="participant.id" class="presence-row">
+      <li v-for="participant in participants" :key="participant.id" class="presence-row" data-testid="presence-row" :data-participant-name="participant.displayName" :data-active="participant.isActive">
         <span class="presence-avatar" :class="{ 'presence-avatar--driver': participant.isMainDriver }">
           {{ initials(participant.displayName) }}
           <i :class="participant.isActive ? 'presence-dot--active' : 'presence-dot--inactive'"></i>
@@ -56,8 +56,8 @@ const formatAgo = (timestamp: number) => {
 
 <style scoped>
 .presence-panel {
-  background: var(--panel-soft);
-  border: 1px solid var(--panel-border);
+  background: var(--surface-muted);
+  border: 1px solid var(--border-subtle);
   border-radius: 14px;
   margin-top: 0.8rem;
   overflow: hidden;
@@ -71,7 +71,7 @@ const formatAgo = (timestamp: number) => {
 
 .presence-row {
   align-items: center;
-  border-top: 1px solid var(--panel-border);
+  border-top: 1px solid var(--border-subtle);
   display: grid;
   gap: 0.75rem;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -84,9 +84,9 @@ const formatAgo = (timestamp: number) => {
 
 .presence-avatar {
   align-items: center;
-  background: #e7edf5;
+  background: var(--neutral-surface);
   border-radius: 12px;
-  color: #52667e;
+  color: var(--text-muted);
   display: inline-flex;
   font-size: 0.72rem;
   font-weight: 900;
@@ -102,7 +102,7 @@ const formatAgo = (timestamp: number) => {
 }
 
 .presence-avatar i {
-  border: 2px solid #fff;
+  border: 2px solid var(--surface-raised);
   border-radius: 999px;
   bottom: -1px;
   height: 11px;
@@ -112,11 +112,11 @@ const formatAgo = (timestamp: number) => {
 }
 
 .presence-dot--active {
-  background: var(--ok);
+  background: var(--success);
 }
 
 .presence-dot--inactive {
-  background: #9aa6b5;
+  background: var(--text-soft);
 }
 
 .presence-identity {

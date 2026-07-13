@@ -221,17 +221,37 @@ export async function runMutation<TInput, TOutput>(
 }
 
 export function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  if (typeof error === "string") {
-    return error;
-  }
-  if (error && typeof error === "object" && "message" in error) {
-    const candidate = (error as { message?: unknown }).message;
-    if (typeof candidate === "string") {
-      return candidate;
+  if (error && typeof error === "object") {
+    const data = (error as { data?: unknown }).data;
+    if (typeof data === "string" && data.trim()) {
+      return data.trim();
+    }
+    if (data && typeof data === "object" && "message" in data) {
+      const dataMessage = (data as { message?: unknown }).message;
+      if (typeof dataMessage === "string" && dataMessage.trim()) {
+        return dataMessage.trim();
+      }
     }
   }
-  return "Unexpected error";
+
+  let message = "Unexpected error";
+  if (error instanceof Error) {
+    message = error.message;
+  } else if (typeof error === "string") {
+    message = error;
+  } else if (error && typeof error === "object" && "message" in error) {
+    const candidate = (error as { message?: unknown }).message;
+    if (typeof candidate === "string") {
+      message = candidate;
+    }
+  }
+
+  const convexError = message.match(/(?:Uncaught\s+)?ConvexError:\s*([^\n]+)/i);
+  if (convexError?.[1]) {
+    return convexError[1].trim();
+  }
+  if (/\[CONVEX\s+[A-Z]\([^\]]+\)\][\s\S]*Server Error/i.test(message)) {
+    return "The request could not be completed. Please check the room details and try again.";
+  }
+  return message.trim() || "Unexpected error";
 }
