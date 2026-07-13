@@ -7,9 +7,11 @@ const props = withDefaults(defineProps<{
   disablePress: boolean;
   buttonStates?: Record<string, ButtonVisualState>;
   removable?: boolean;
+  density?: "comfortable" | "compact";
 }>(), {
   buttonStates: () => ({}),
   removable: false,
+  density: "comfortable",
 });
 
 const emit = defineEmits<{
@@ -33,7 +35,7 @@ const buttonState = (buttonId: string, isEnabled: boolean): ButtonVisualState =>
 </script>
 
 <template>
-  <div class="sound-grid">
+  <div class="sound-grid" :class="`sound-grid--${density}`">
     <div
       v-for="button in buttons"
       :key="button.id"
@@ -49,6 +51,7 @@ const buttonState = (buttonId: string, isEnabled: boolean): ButtonVisualState =>
         ]"
         @click="emit('press', button.id)"
       >
+        <span class="sound-cell__pulse" aria-hidden="true"></span>
         <span class="sound-cell__label">{{ button.label }}</span>
         <span class="sound-cell__meta">
           {{ button.isEnabled ? stateLabelByStatus[buttonState(button.id, button.isEnabled)] : 'Disabled' }}
@@ -63,7 +66,7 @@ const buttonState = (buttonId: string, isEnabled: boolean): ButtonVisualState =>
         :aria-label="`Remove ${button.label}`"
         @click="emit('remove', button.id)"
       >
-        Remove
+        ×
       </button>
     </div>
   </div>
@@ -72,109 +75,185 @@ const buttonState = (buttonId: string, isEnabled: boolean): ButtonVisualState =>
 <style scoped>
 .sound-grid {
   display: grid;
+  gap: 0.8rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
+}
+
+.sound-grid--compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
 }
 
 .sound-cell-wrap {
+  min-width: 0;
   position: relative;
 }
 
 .sound-cell {
+  --state: #718096;
+  --state-soft: #edf2f7;
   align-items: center;
-  --glow-soft: rgba(0, 0, 0, 0);
-  --glow-strong: rgba(0, 0, 0, 0);
-  background: #ffffff;
-  border: 2px solid #d2dce9;
-  box-shadow: 0 0 0 0 rgba(0 0 0 / 0);
-  color: #132032;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 98%), rgb(248 250 253 / 98%));
+  border: 1px solid #d7e0eb;
+  border-radius: 18px;
+  box-shadow: 0 5px 14px rgb(40 61 86 / 7%);
+  color: #142033;
   display: flex;
   flex-direction: column;
-  font-size: 1.22rem;
-  font-weight: 800;
+  font-size: clamp(1.05rem, 2.5vw, 1.32rem);
+  font-weight: 850;
   justify-content: center;
-  min-height: 130px;
-  padding: 0.75rem;
+  min-height: 142px;
+  overflow: hidden;
+  padding: 1rem 0.8rem;
+  position: relative;
   text-align: center;
-  transition: border-color 0.22s ease, box-shadow 0.22s ease;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.12s ease,
+    background 0.16s ease;
   width: 100%;
 }
 
+.sound-grid--compact .sound-cell {
+  border-radius: 15px;
+  font-size: clamp(0.92rem, 2vw, 1.1rem);
+  min-height: 112px;
+  padding: 0.8rem 0.55rem;
+}
+
+.sound-cell:hover:not(:disabled) {
+  background: #fff;
+  border-color: #b8c7d9;
+  box-shadow: 0 10px 24px rgb(40 61 86 / 12%);
+  transform: translateY(-2px);
+}
+
+.sound-cell:active:not(:disabled) {
+  box-shadow: 0 3px 10px rgb(40 61 86 / 10%);
+  transform: translateY(0) scale(0.985);
+}
+
+.sound-cell__pulse {
+  background: var(--state);
+  border: 4px solid var(--state-soft);
+  border-radius: 999px;
+  height: 16px;
+  margin-bottom: 0.75rem;
+  width: 16px;
+}
+
+.sound-grid--compact .sound-cell__pulse {
+  height: 13px;
+  margin-bottom: 0.55rem;
+  width: 13px;
+}
+
 .sound-cell__label {
-  line-height: 1.2;
+  line-height: 1.12;
+  max-width: 100%;
 }
 
 .sound-cell__meta {
+  color: #69788c;
   display: inline-block;
-  font-size: 0.78rem;
-  font-weight: 600;
-  margin-top: 0.5rem;
-  opacity: 0.76;
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.025em;
+  margin-top: 0.48rem;
+  text-transform: uppercase;
 }
 
 .sound-cell--idle {
-  border-color: #d2dce9;
+  --state: #6b7f96;
+  --state-soft: #e7edf4;
 }
 
 .sound-cell--pending {
-  --glow-soft: rgba(255, 154, 28, 0.32);
-  --glow-strong: rgba(255, 154, 28, 0.24);
-  border-color: #ff9a1c;
-  animation: glow-intensity 0.95s ease-in-out infinite;
+  --state: #dd8b22;
+  --state-soft: #fff0d8;
+  background: linear-gradient(180deg, #fffdf8, #fff7eb);
+  border-color: #e8b66e;
+  box-shadow: 0 0 0 3px rgb(221 139 34 / 9%), 0 10px 24px rgb(181 110 26 / 12%);
 }
 
 .sound-cell--accepted {
-  --glow-soft: rgba(45, 178, 110, 0.34);
-  --glow-strong: rgba(45, 178, 110, 0.26);
-  border-color: #2db26e;
-  animation: glow-intensity 1.15s ease-in-out infinite;
+  --state: #2d9b5d;
+  --state-soft: #dcf3e5;
+  background: linear-gradient(180deg, #fbfffc, #eef9f2);
+  border-color: #8bcaa4;
 }
 
 .sound-cell--rejected {
-  --glow-soft: rgba(226, 80, 80, 0.34);
-  --glow-strong: rgba(226, 80, 80, 0.26);
-  border-color: #e25050;
-  animation: glow-intensity 1.1s ease-in-out infinite;
+  --state: #d25450;
+  --state-soft: #fde5e3;
+  background: linear-gradient(180deg, #fffdfd, #fff0ef);
+  border-color: #e4a19e;
+}
+
+.sound-cell--pending .sound-cell__pulse,
+.sound-cell--accepted .sound-cell__pulse,
+.sound-cell--rejected .sound-cell__pulse {
+  animation: state-pulse 1.15s ease-in-out infinite;
 }
 
 .sound-cell--active {
-  transform: translateY(-1px);
+  box-shadow: 0 0 0 3px rgb(221 139 34 / 10%), 0 14px 30px rgb(181 110 26 / 15%);
 }
 
 .sound-cell--disabled {
-  border-color: #d9e1ec;
-  filter: grayscale(0.2);
-  opacity: 0.7;
+  filter: grayscale(0.45);
+  opacity: 0.58;
 }
 
 .sound-cell-remove {
-  background: #fff3f2;
-  border: 1px solid #e8b8b5;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e5b9b6;
   border-radius: 999px;
-  color: #ae3e3a;
-  font-size: 0.68rem;
-  font-weight: 700;
-  padding: 0.18rem 0.5rem;
+  box-shadow: 0 3px 9px rgb(94 48 45 / 10%);
+  color: #b13f3b;
+  display: inline-flex;
+  font-size: 1rem;
+  height: 30px;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0;
   position: absolute;
-  right: 0.45rem;
-  top: 0.45rem;
+  right: 0.55rem;
+  top: 0.55rem;
+  width: 30px;
+  z-index: 2;
 }
 
-@keyframes glow-intensity {
-  0% {
-    box-shadow: 0 0 0 0 var(--glow-soft), 0 0 0 0 var(--glow-strong);
+.sound-cell-remove:hover:not(:disabled) {
+  background: #fff0ef;
+  box-shadow: 0 4px 12px rgb(94 48 45 / 14%);
+}
+
+@keyframes state-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--state) 22%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 2px var(--glow-soft), 0 0 20px 6px var(--glow-strong);
-  }
-  100% {
-    box-shadow: 0 0 0 0 var(--glow-soft), 0 0 0 0 var(--glow-strong);
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--state) 10%, transparent);
   }
 }
 
-@media (max-width: 640px) {
-  .sound-cell {
-    min-height: 115px;
+@media (max-width: 700px) {
+  .sound-grid {
+    gap: 0.65rem;
+  }
+
+  .sound-grid--compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sound-cell,
+  .sound-grid--compact .sound-cell {
+    min-height: 118px;
   }
 }
 </style>

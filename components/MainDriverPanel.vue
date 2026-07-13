@@ -664,193 +664,482 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="card">
-    <h3>Main Driver Panel</h3>
-    <p class="muted">Upload and manage sound buttons for this room.</p>
-    <p class="muted">You can upload audio files (.m4a supported) or videos; playback uses the video's audio track.</p>
-    <p v-if="!props.appEnabled" class="muted">{{ APP_LOCKED_MESSAGE }}</p>
+  <div class="driver-panel">
+    <div class="driver-panel__intro">
+      <div>
+        <span class="driver-panel__kicker">Main driver</span>
+        <h3>Manage soundboard</h3>
+        <p class="muted">Add signals, reuse templates, and configure decision sounds.</p>
+      </div>
+      <span class="driver-panel__count">{{ buttons.length }} signals</span>
+    </div>
+
+    <div v-if="!props.appEnabled" class="driver-notice">{{ APP_LOCKED_MESSAGE }}</div>
     <p v-if="connectionWarning" class="error">{{ connectionWarning }}</p>
 
-    <div class="card driver-subcard">
-      <h4>Create button</h4>
-      <div class="row">
-        <div class="driver-col">
-          <label>Label</label>
-          <input v-model="draftLabel" maxlength="48" placeholder="Example: Horn" @input="onDraftLabelInput" />
-        </div>
-        <div class="driver-col">
-          <label>Sound file</label>
-          <input type="file" :accept="SOURCE_FILE_ACCEPT" @change="(event) => onSelectFile(event, 'draft')" />
-        </div>
-      </div>
-      <button :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" @click="createNewButton">Create Button</button>
-    </div>
-
-    <div class="card driver-subcard">
-      <h4>Templates</h4>
-      <p class="muted">Save your current setup and reuse it in future rooms.</p>
-      <div class="row">
-        <div class="driver-col">
-          <label>Template name</label>
-          <input v-model="templateName" maxlength="80" placeholder="Example: Weekend Ride" />
-        </div>
-        <div class="driver-col template-actions">
-          <label>&nbsp;</label>
-          <button
-            :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving || !templateName.trim()"
-            @click="saveCurrentAsTemplate"
-          >
-            Save Current Setup as Template
-          </button>
-        </div>
-      </div>
-
-      <p v-if="templatesPending" class="muted">Loading templates...</p>
-      <p v-else-if="!templates.length" class="muted">No templates saved yet.</p>
-      <template v-else>
-        <div class="row">
-          <div class="driver-col">
-            <label>Saved templates</label>
-            <select v-model="selectedTemplateId">
-              <option v-for="template in templates" :key="template.id" :value="template.id">
-                {{ template.name }} · {{ template.buttonCount }} buttons ·
-                {{ template.hasOutcomeSounds ? "with outcomes" : "no outcomes" }}
-              </option>
-            </select>
-            <p v-if="selectedTemplate" class="muted template-meta">
-              Updated {{ formatTemplateUpdatedAt(selectedTemplate.updatedAt) }}
-            </p>
-          </div>
-        </div>
-        <div class="row template-action-row">
-          <button
-            :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving || !selectedTemplateId"
-            class="secondary"
-            @click="applyTemplate"
-          >
-            Apply Template to This Room
-          </button>
-          <button
-            :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving || !selectedTemplateId"
-            class="danger"
-            @click="removeTemplate"
-          >
-            Delete Template
-          </button>
-        </div>
-      </template>
-    </div>
-
-    <div class="card driver-subcard">
-      <h4>Outcome sounds</h4>
-      <p class="muted">
-        Current: accept {{ outcomeSounds.acceptUrl ? 'configured' : 'missing' }}, reject
-        {{ outcomeSounds.rejectUrl ? 'configured' : 'missing' }}
-      </p>
-      <div class="row">
-        <div class="driver-col">
-          <label>Accept sound</label>
-          <input type="file" :accept="SOURCE_FILE_ACCEPT" @change="(event) => onSelectFile(event, 'accept')" />
-        </div>
-        <div class="driver-col">
-          <label>Reject sound</label>
-          <input type="file" :accept="SOURCE_FILE_ACCEPT" @change="(event) => onSelectFile(event, 'reject')" />
-        </div>
-      </div>
-      <button :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" class="secondary" @click="saveOutcomeSounds">
-        Save Outcome Sounds
-      </button>
-    </div>
-
-    <div class="card driver-subcard">
-      <h4>Existing buttons</h4>
-      <p v-if="!buttons.length" class="muted">No buttons configured.</p>
-
-      <div v-for="button in buttons" :key="button.id" class="button-row">
+    <details class="driver-group" open>
+      <summary>
+        <span class="driver-group__icon">＋</span>
+        <span><strong>Create signal</strong><small>Add a new large soundboard button</small></span>
+        <span class="driver-group__chevron">⌄</span>
+      </summary>
+      <div class="driver-group__body">
         <div class="row">
           <div class="driver-col">
             <label>Label</label>
-            <input
-              v-model="buttonDrafts[button.id].label"
-              maxlength="48"
-              @input="markButtonDirty(button.id)"
-            />
+            <input v-model="draftLabel" maxlength="48" placeholder="Example: Horn" @input="onDraftLabelInput" />
           </div>
           <div class="driver-col">
-            <label>Replace sound (optional)</label>
-            <input
-              type="file"
-              :accept="SOURCE_FILE_ACCEPT"
-              @change="(event) => onSelectReplacementFile(event, button.id)"
-            />
-          </div>
-          <div class="driver-col check-col">
-            <label>Enabled</label>
-            <input
-              type="checkbox"
-              v-model="buttonDrafts[button.id].isEnabled"
-              @change="markButtonDirty(button.id)"
-            />
+            <label>Sound file</label>
+            <input type="file" :accept="SOURCE_FILE_ACCEPT" @change="(event) => onSelectFile(event, 'draft')" />
+            <span class="field-help">Audio or video, up to 8 MB and 20 seconds.</span>
           </div>
         </div>
-        <div class="row button-row__actions">
-          <button :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" class="secondary" @click="saveButton(button.id)">Save</button>
-          <button :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" class="danger" @click="removeButton(button.id)">Delete</button>
+        <button class="driver-primary" :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" @click="createNewButton">
+          {{ isSaving ? 'Working…' : 'Create Button' }}
+        </button>
+      </div>
+    </details>
+
+    <details class="driver-group">
+      <summary>
+        <span class="driver-group__icon driver-group__icon--blue">▣</span>
+        <span><strong>Templates</strong><small>Reuse a complete setup in future rooms</small></span>
+        <span class="driver-group__chevron">⌄</span>
+      </summary>
+      <div class="driver-group__body">
+        <div class="row">
+          <div class="driver-col">
+            <label>Template name</label>
+            <input v-model="templateName" maxlength="80" placeholder="Example: Weekend Ride" />
+          </div>
+          <div class="driver-col template-actions">
+            <label>&nbsp;</label>
+            <button
+              :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving || !templateName.trim()"
+              @click="saveCurrentAsTemplate"
+            >
+              Save Current Setup as Template
+            </button>
+          </div>
+        </div>
+
+        <p v-if="templatesPending" class="muted">Loading templates...</p>
+        <p v-else-if="!templates.length" class="empty-helper">No templates saved yet.</p>
+        <template v-else>
+          <div class="row template-picker">
+            <div class="driver-col">
+              <label>Saved templates</label>
+              <select v-model="selectedTemplateId">
+                <option v-for="template in templates" :key="template.id" :value="template.id">
+                  {{ template.name }} · {{ template.buttonCount }} buttons ·
+                  {{ template.hasOutcomeSounds ? "with outcomes" : "no outcomes" }}
+                </option>
+              </select>
+              <p v-if="selectedTemplate" class="muted template-meta">
+                Updated {{ formatTemplateUpdatedAt(selectedTemplate.updatedAt) }}
+              </p>
+            </div>
+          </div>
+          <div class="row template-action-row">
+            <button
+              :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving || !selectedTemplateId"
+              class="secondary"
+              @click="applyTemplate"
+            >
+              Apply Template to This Room
+            </button>
+            <button
+              :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving || !selectedTemplateId"
+              class="danger"
+              @click="removeTemplate"
+            >
+              Delete Template
+            </button>
+          </div>
+        </template>
+      </div>
+    </details>
+
+    <details class="driver-group">
+      <summary>
+        <span class="driver-group__icon driver-group__icon--amber">✓</span>
+        <span><strong>Decision sounds</strong><small>Audio played after accept or reject</small></span>
+        <span class="driver-group__chevron">⌄</span>
+      </summary>
+      <div class="driver-group__body">
+        <div class="outcome-status">
+          <span class="badge" :class="outcomeSounds.acceptUrl ? 'ok' : 'off'">Accept {{ outcomeSounds.acceptUrl ? 'ready' : 'missing' }}</span>
+          <span class="badge" :class="outcomeSounds.rejectUrl ? 'ok' : 'off'">Reject {{ outcomeSounds.rejectUrl ? 'ready' : 'missing' }}</span>
+        </div>
+        <div class="row">
+          <div class="driver-col">
+            <label>Accept sound</label>
+            <input type="file" :accept="SOURCE_FILE_ACCEPT" @change="(event) => onSelectFile(event, 'accept')" />
+          </div>
+          <div class="driver-col">
+            <label>Reject sound</label>
+            <input type="file" :accept="SOURCE_FILE_ACCEPT" @change="(event) => onSelectFile(event, 'reject')" />
+          </div>
+        </div>
+        <button :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" class="secondary" @click="saveOutcomeSounds">
+          Save Outcome Sounds
+        </button>
+      </div>
+    </details>
+
+    <details class="driver-group" :open="buttons.length > 0">
+      <summary>
+        <span class="driver-group__icon driver-group__icon--slate">≡</span>
+        <span><strong>Existing signals</strong><small>Edit, disable, replace, or remove buttons</small></span>
+        <span class="driver-group__chevron">⌄</span>
+      </summary>
+      <div class="driver-group__body">
+        <p v-if="!buttons.length" class="empty-helper">No buttons configured.</p>
+
+        <div v-for="button in buttons" :key="button.id" class="button-row">
+          <div class="button-row__heading">
+            <strong>{{ button.label }}</strong>
+            <span class="badge" :class="buttonDrafts[button.id].isEnabled ? 'ok' : 'off'">
+              {{ buttonDrafts[button.id].isEnabled ? 'Enabled' : 'Disabled' }}
+            </span>
+          </div>
+          <div class="row">
+            <div class="driver-col">
+              <label>Label</label>
+              <input
+                v-model="buttonDrafts[button.id].label"
+                maxlength="48"
+                @input="markButtonDirty(button.id)"
+              />
+            </div>
+            <div class="driver-col">
+              <label>Replace sound (optional)</label>
+              <input
+                type="file"
+                :accept="SOURCE_FILE_ACCEPT"
+                @change="(event) => onSelectReplacementFile(event, button.id)"
+              />
+            </div>
+            <label class="toggle-field">
+              <input
+                type="checkbox"
+                v-model="buttonDrafts[button.id].isEnabled"
+                @change="markButtonDirty(button.id)"
+              />
+              <span class="toggle-field__track"><i></i></span>
+              <span>Enabled</span>
+            </label>
+          </div>
+          <div class="row button-row__actions">
+            <button :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" class="secondary" @click="saveButton(button.id)">Save</button>
+            <button :disabled="!props.appEnabled || Boolean(connectionWarning) || isSaving" class="ghost danger-text" @click="removeButton(button.id)">Delete</button>
+          </div>
         </div>
       </div>
-    </div>
+    </details>
 
-    <p v-if="panelError" class="error">{{ panelError }}</p>
-    <p v-if="panelSuccess" class="success">{{ panelSuccess }}</p>
+    <p v-if="panelError" class="error driver-message">{{ panelError }}</p>
+    <p v-if="panelSuccess" class="success driver-message">{{ panelSuccess }}</p>
   </div>
 </template>
 
 <style scoped>
-.driver-subcard {
-  margin-top: 0.8rem;
+.driver-panel {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.driver-panel__intro {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+
+.driver-panel__intro p {
+  font-size: 0.82rem;
+  margin: 0.2rem 0 0;
+}
+
+.driver-panel__kicker {
+  color: var(--accent);
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.driver-panel__count {
+  background: var(--accent-soft);
+  border-radius: 999px;
+  color: var(--accent);
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 850;
+  padding: 0.38rem 0.65rem;
+}
+
+.driver-notice {
+  background: var(--warn-soft);
+  border: 1px solid #efd5a8;
+  border-radius: 12px;
+  color: #855617;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0.7rem;
+}
+
+.driver-group {
+  background: #fff;
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.driver-group summary {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  list-style: none;
+  min-height: 66px;
+  padding: 0.7rem 0.8rem;
+  user-select: none;
+}
+
+.driver-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.driver-group summary:hover {
+  background: var(--panel-soft);
+}
+
+.driver-group summary > span:nth-child(2) {
+  display: flex;
+  flex-direction: column;
+}
+
+.driver-group summary strong {
+  font-size: 0.88rem;
+}
+
+.driver-group summary small {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  margin-top: 0.1rem;
+}
+
+.driver-group__icon {
+  align-items: center;
+  background: var(--accent-soft);
+  border-radius: 10px;
+  color: var(--accent);
+  display: inline-flex;
+  font-size: 1rem;
+  font-weight: 900;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+
+.driver-group__icon--blue {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.driver-group__icon--amber {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.driver-group__icon--slate {
+  background: #edf2f7;
+  color: #61748a;
+}
+
+.driver-group__chevron {
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  transition: transform 0.16s ease;
+}
+
+.driver-group[open] .driver-group__chevron {
+  transform: rotate(180deg);
+}
+
+.driver-group__body {
+  border-top: 1px solid var(--panel-border);
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.85rem;
 }
 
 .driver-col {
   flex: 1 1 230px;
+  min-width: 0;
 }
 
 .template-actions {
   align-self: flex-end;
 }
 
-.template-action-row {
-  margin-top: 0.5rem;
+.template-action-row,
+.template-picker {
+  margin-top: 0.1rem;
 }
 
 .template-meta {
-  margin: 0.45rem 0 0;
+  font-size: 0.75rem;
+  margin: 0.35rem 0 0;
+}
+
+.field-help {
+  color: var(--text-muted);
+  display: block;
+  font-size: 0.7rem;
+  margin-top: 0.3rem;
+}
+
+.driver-primary {
+  justify-self: start;
+}
+
+.empty-helper {
+  background: var(--panel-soft);
+  border: 1px dashed var(--panel-border-strong);
+  border-radius: 12px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin: 0;
+  padding: 0.8rem;
+  text-align: center;
+}
+
+.outcome-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
 }
 
 .button-row {
-  border-top: 1px solid #295067;
-  margin-top: 0.8rem;
-  padding-top: 0.8rem;
+  background: var(--panel-soft);
+  border: 1px solid var(--panel-border);
+  border-radius: 13px;
+  padding: 0.8rem;
 }
 
-.button-row:first-of-type {
-  border-top: 0;
-  margin-top: 0;
-  padding-top: 0;
+.button-row + .button-row {
+  margin-top: 0.2rem;
+}
+
+.button-row__heading {
+  align-items: center;
+  display: flex;
+  gap: 0.7rem;
+  justify-content: space-between;
+  margin-bottom: 0.65rem;
+}
+
+.button-row__heading strong {
+  font-size: 0.86rem;
 }
 
 .button-row__actions {
-  margin-top: 0.5rem;
+  margin-top: 0.1rem;
 }
 
-.check-col {
-  align-items: flex-start;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
+.button-row__actions button {
+  min-width: 88px;
 }
 
-.check-col input {
-  margin-top: 0.55rem;
-  width: auto;
+.danger-text {
+  color: var(--danger);
+}
+
+.toggle-field {
+  align-items: center;
+  align-self: flex-end;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0.45rem;
+  margin: 0 0 0.25rem;
+}
+
+.toggle-field > input {
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.toggle-field__track {
+  background: #cbd4df;
+  border-radius: 999px;
+  display: inline-flex;
+  height: 24px;
+  padding: 3px;
+  transition: background 0.15s ease;
+  width: 42px;
+}
+
+.toggle-field__track i {
+  background: #fff;
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgb(30 45 64 / 20%);
+  height: 18px;
+  transform: translateX(0);
+  transition: transform 0.15s ease;
+  width: 18px;
+}
+
+.toggle-field > input:checked + .toggle-field__track {
+  background: var(--accent);
+}
+
+.toggle-field > input:checked + .toggle-field__track i {
+  transform: translateX(18px);
+}
+
+.toggle-field > input:focus-visible + .toggle-field__track {
+  box-shadow: var(--focus-ring);
+}
+
+.driver-message {
+  margin: 0;
+}
+
+@media (max-width: 620px) {
+  .driver-panel__intro {
+    align-items: flex-start;
+  }
+
+  .driver-group summary {
+    padding-left: 0.65rem;
+    padding-right: 0.65rem;
+  }
+
+  .driver-group__body {
+    padding: 0.7rem;
+  }
+
+  .template-actions label {
+    display: none;
+  }
+
+  .template-actions button,
+  .driver-primary {
+    width: 100%;
+  }
+
+  .toggle-field {
+    margin-top: 0.25rem;
+  }
 }
 </style>

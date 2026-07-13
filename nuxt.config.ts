@@ -197,7 +197,7 @@ export default defineNuxtConfig({
   app: {
     head: {
       meta: [
-        { name: "theme-color", content: "#fff8ef" },
+        { name: "theme-color", content: "#f7f9fc" },
         { name: "mobile-web-app-capable", content: "yes" },
         { name: "apple-mobile-web-app-capable", content: "yes" },
         { name: "apple-mobile-web-app-status-bar-style", content: "default" },
@@ -228,8 +228,8 @@ export default defineNuxtConfig({
       scope: "/",
       display: "standalone",
       orientation: "portrait",
-      background_color: "#fff8ef",
-      theme_color: "#fff8ef",
+      background_color: "#f7f9fc",
+      theme_color: "#f7f9fc",
       lang: "en-US",
       icons: [
         {
